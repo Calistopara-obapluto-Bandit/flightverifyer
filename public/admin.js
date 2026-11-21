@@ -588,8 +588,25 @@ function renderSupport(requests) {
       <h3>${esc(request.category)}</h3>
       <p class="support-card__from">${esc(request.name)} · <a href="mailto:${esc(request.email)}">${esc(request.email)}</a></p>
       <p class="support-card__message">${esc(request.message)}</p>
+      ${request.emailed ? '' : `<button type="button" class="btn btn-ghost btn-small" data-email-request="${esc(request.id)}">Email to inbox</button>`}
     </article>`;
   }).join('');
 }
+
+supportList.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-email-request]');
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'Sending…';
+  try {
+    await api(`/api/admin/support/${encodeURIComponent(button.dataset.emailRequest)}/email`, { method: 'POST' });
+    await loadSupport();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Try again';
+    button.title = error.message;
+    window.alert(error.message);
+  }
+});
 
 if ($('#refresh-support')) $('#refresh-support').addEventListener('click', loadSupport);

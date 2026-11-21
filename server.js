@@ -901,6 +901,13 @@ const supportRecipient = supportRecipients[0];
 const supportSender = String(process.env.SUPPORT_FROM || 'airopack desk <onboarding@resend.dev>').trim();
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
 
+// Brevo only needs a single-click sender verification, so it can deliver to a
+// normal inbox without owning a domain. It is the preferred transport.
+const brevoApiKey = String(process.env.BREVO_API_KEY || '').trim();
+const brevoApiUrl = String(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email').trim();
+const brevoSenderEmail = String(process.env.BREVO_SENDER || supportRecipient).trim();
+const brevoSenderName = String(process.env.BREVO_SENDER_NAME || 'AiroPack desk').trim();
+
 // Render's free tier blocks outbound SMTP, so without a Resend key the request
 // goes out over HTTPS through a no-account mail relay (formsubmit.co) instead.
 const supportFormEndpoint = (() => {
@@ -964,8 +971,8 @@ async function sendViaFormRelay(request, subject, endpoint) {
 }
 
 async function emailSupportRequest(request) {
-  if (!resendApiKey && !supportFormEndpoint) {
-    console.warn('[support] No mail transport configured (RESEND_API_KEY or SUPPORT_FORM_ENDPOINT); the request was saved but not emailed.');
+  if (!brevoApiKey && !resendApiKey && !supportFormEndpoint) {
+    console.warn('[support] No mail transport configured (BREVO_API_KEY, RESEND_API_KEY or SUPPORT_FORM_ENDPOINT); the request was saved but not emailed.');
     return false;
   }
 
@@ -1012,8 +1019,40 @@ async function emailSupportRequest(request) {
 
   const failures = [];
 
-  // Resend first when a key is present; if it refuses, the relay still gets a
-  // chance so one broken transport never swallows a request.
+  if (brevoApiKey) {
+    try {
+      const response = await fetch(brevoApiUrl, {
+        method: 'POST',
+        headers: {
+          'api-key': brevoApiKey,
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: brevoSenderName, email: brevoSenderEmail },
+          to: supportRecipients.map((address) => ({ email: address })),
+          replyTo: { email: request.email, name: request.name },
+          subject,
+          htmlContent: html,
+          textContent: text
+        }),
+        signal: AbortSignal.timeout(10_000)
+      });
+
+      if (response.ok) {
+        console.log(`[support] ${request.reference} emailed to ${supportRecipients.join(', ')} via Brevo`);
+        return true;
+      }
+
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Brevo responded ${response.status}: ${detail.slice(0, 300)}`);
+    } catch (error) {
+      failures.push(`Brevo: ${error.message}`);
+    }
+  }
+
+  // Every keyed transport gets a turn, and the relay still gets a chance, so one
+  // broken transport never swallows a request.
   if (resendApiKey) {
     try {
       const response = await fetch('https://api.resend.com/emails', {
@@ -1416,6 +1455,31 @@ app.get('/api/admin/support', requireAdmin, requireDatabase, asyncRoute(async (r
   res.json({ requests: rows.map((row) => parsePayload(row.payload)) });
 }));
 
+// Delivery can be retried from the console once a mail key is in place, so a
+// ticket that arrived while mail was broken is not stranded.
+app.post('/api/admin/support/:id/email', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const { rows } = await pool.query('SELECT payload FROM support_requests WHERE id = $1', [String(req.params.id)]);
+  if (!rows.length) {
+    return res.status(404).json({ error: 'That support request is no longer stored.' });
+  }
+
+  const request = parsePayload(rows[0].payload);
+  if (!brevoApiKey && !resendApiKey && !supportFormEndpoint) {
+    return res.status(409).json({ error: 'No mail transport is configured yet. Add BREVO_API_KEY in Render, then try again.' });
+  }
+
+  try {
+    await emailSupportRequest(request);
+  } catch (error) {
+    console.error(`[support] retry failed for ${request.reference}:`, error.message);
+    return res.status(502).json({ error: `Mail could not be sent. ${error.message}` });
+  }
+
+  await saveSupportRequest({ ...request, emailed: true });
+  console.log(`[support] ${request.reference} re-sent from the console`);
+  res.json({ emailed: true });
+}));
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
 
 app.get('*', (req, res) => {
@@ -1436,7 +1500,7 @@ initWithRetry().then((ready) => {
   app.listen(port, () => {
     console.log(`AiroPack desk listening on http://localhost:${port}`);
     console.log(`[db] Neon Postgres ${ready ? 'connected' : 'NOT connected'}`);
-    console.log(`[support] requests email to ${supportRecipients.join(', ')} via ${resendApiKey ? 'Resend' : supportFormEndpoint ? 'the FormSubmit relay' : 'no transport (not emailed)'}`);
+    console.log(`[support] requests email to ${supportRecipients.join(', ')} via ${brevoApiKey ? 'Brevo' : resendApiKey ? 'Resend' : supportFormEndpoint ? 'the FormSubmit relay' : 'no transport (not emailed)'}`);
     if (usingDefaultCredentials) {
       console.warn('[admin] Using default sign-in admin@verifymyflight.local / verify-admin-2026 — set ADMIN_EMAIL and ADMIN_PASSWORD before deploying.');
     }
