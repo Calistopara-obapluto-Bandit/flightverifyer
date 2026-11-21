@@ -60,6 +60,14 @@ async function initDatabase() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS support_requests (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   const { rows } = await pool.query('SELECT COUNT(*) AS count FROM bookings');
   if (Number(rows[0].count) === 0) {
     const now = Date.now();
@@ -785,6 +793,21 @@ function decorateShipment(shipment) {
   };
 }
 
+const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+const MAX_SHIPMENT_IMAGES = 6;
+const MAX_IMAGE_CHARS = 700_000;
+
+// Parcel photos travel inside the shipment payload as data URLs: Render's disk
+// is ephemeral, so keeping them in the Neon record is what survives a restart.
+function shipmentImages(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((value) => typeof value === 'string'
+      && value.length <= MAX_IMAGE_CHARS
+      && IMAGE_DATA_URL.test(value))
+    .slice(0, MAX_SHIPMENT_IMAGES);
+}
+
 function buildShipment(input, code) {
   const now = new Date().toISOString();
   const status = shipmentStatuses.includes(text(input.status, 20)) ? text(input.status, 20) : 'registered';
@@ -817,6 +840,7 @@ function buildShipment(input, code) {
     insured: input.insured === true || input.insured === 'true' || input.insured === 'on',
     customs: Object.hasOwn(customsStates, text(input.customs, 20)) ? text(input.customs, 20) : shipmentDefaults.customs,
     signedBy: text(input.signedBy, 80),
+    images: shipmentImages(input.images),
     registeredAt,
     etaAt,
     deliveredAt: status === 'delivered' ? isoOr(input.deliveredAt, now) : null,
@@ -832,6 +856,8 @@ function buildShipment(input, code) {
 /* ------------------------------------------------------------------ */
 
 app.disable('x-powered-by');
+// Parcel photos arrive as data URLs, so that one route gets a larger body.
+app.use('/api/admin/shipments', express.json({ limit: '8mb' }));
 app.use(express.json({ limit: '64kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -865,7 +891,13 @@ function readJsonFile(file, fallback) {
 /* Resend API key → HTTPS mail relay (no account) → logged only        */
 /* ------------------------------------------------------------------ */
 
-const supportRecipient = String(process.env.SUPPORT_EMAIL || 'support.sbiamautos@gmail.com').trim();
+// SUPPORT_EMAIL accepts a comma-separated list, so a second inbox can be added
+// without a code change.
+const supportRecipients = String(process.env.SUPPORT_EMAIL || 'support.sbiamautos@gmail.com')
+  .split(',')
+  .map((address) => address.trim())
+  .filter(Boolean);
+const supportRecipient = supportRecipients[0];
 const supportSender = String(process.env.SUPPORT_FROM || 'flightverifyer desk <onboarding@resend.dev>').trim();
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
 
@@ -874,8 +906,12 @@ const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
 const supportFormEndpoint = (() => {
   const configured = String(process.env.SUPPORT_FORM_ENDPOINT || '').trim();
   if (configured) return /^(off|none|disabled|false)$/i.test(configured) ? '' : configured;
-  return `https://formsubmit.co/ajax/${supportRecipient}`;
+  return 'https://formsubmit.co/ajax/';
 })();
+
+const relayEndpointFor = (recipient) => (supportFormEndpoint.endsWith('/')
+  ? `${supportFormEndpoint}${recipient}`
+  : supportFormEndpoint);
 
 // The relay only accepts browser-shaped posts, so present one.
 const supportFormOrigin = String(process.env.SUPPORT_FORM_ORIGIN || 'https://flightverifyer.onrender.com').replace(/\/$/, '');
@@ -889,8 +925,8 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   "'": '&#39;'
 }[char]));
 
-async function sendViaFormRelay(request, subject) {
-  const response = await fetch(supportFormEndpoint, {
+async function sendViaFormRelay(request, subject, endpoint) {
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -917,7 +953,11 @@ async function sendViaFormRelay(request, subject) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || String(payload.success) === 'false') {
-    throw new Error(payload.message || `Mail relay responded ${response.status}`);
+    const message = String(payload.message || `Mail relay responded ${response.status}`);
+    if (/activation/i.test(message)) {
+      throw new Error(`${message} — open the confirmation email sent to ${supportRecipient} and activate the form once.`);
+    }
+    throw new Error(message);
   }
 
   return true;
@@ -970,33 +1010,73 @@ async function emailSupportRequest(request) {
   </table>
 </body></html>`;
 
-  if (!resendApiKey) {
-    return sendViaFormRelay(request, subject);
+  const failures = [];
+
+  // Resend first when a key is present; if it refuses, the relay still gets a
+  // chance so one broken transport never swallows a request.
+  if (resendApiKey) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: supportSender,
+          to: supportRecipients,
+          reply_to: request.email,
+          subject,
+          text,
+          html
+        }),
+        signal: AbortSignal.timeout(10_000)
+      });
+
+      if (response.ok) {
+        console.log(`[support] ${request.reference} emailed to ${supportRecipients.join(', ')} via Resend`);
+        return true;
+      }
+
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Resend responded ${response.status}: ${detail.slice(0, 300)}`);
+    } catch (error) {
+      failures.push(`Resend: ${error.message}`);
+    }
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from: supportSender,
-      to: [supportRecipient],
-      reply_to: request.email,
-      subject,
-      text,
-      html
-    }),
-    signal: AbortSignal.timeout(10_000)
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Resend responded ${response.status}: ${detail.slice(0, 300)}`);
+  if (supportFormEndpoint) {
+    let delivered = 0;
+    for (const recipient of supportRecipients) {
+      try {
+        await sendViaFormRelay(request, subject, relayEndpointFor(recipient));
+        console.log(`[support] ${request.reference} emailed to ${recipient} via the HTTPS relay`);
+        delivered += 1;
+      } catch (error) {
+        failures.push(`relay → ${recipient}: ${error.message}`);
+      }
+    }
+    if (delivered > 0) return true;
   }
 
-  return true;
+  throw new Error(failures.join(' · ') || 'No mail transport is configured.');
+}
+
+// Support requests are kept in Neon as well as in the local JSON file: Render's
+// disk is ephemeral, and the admin console has to be able to read every ticket
+// even when no mail transport is configured.
+async function saveSupportRequest(request) {
+  if (!pool) return false;
+  try {
+    await pool.query(
+      'INSERT INTO support_requests (id, payload, created_at) VALUES ($1, $2::jsonb, $3) ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload',
+      [request.id, JSON.stringify(request), request.createdAt]
+    );
+    return true;
+  } catch (error) {
+    console.error(`[support] could not store ${request.reference} in Postgres:`, error.message);
+    return false;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1323,11 +1403,18 @@ app.post('/api/support', async (req, res, next) => {
       console.error(`[support] email delivery failed for ${request.reference}:`, error.message);
     }
 
+    await saveSupportRequest({ ...request, emailed });
+
     res.status(201).json({ reference: request.reference, receivedAt: request.createdAt, emailed });
   } catch (error) {
     next(error);
   }
 });
+
+app.get('/api/admin/support', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const { rows } = await pool.query('SELECT payload FROM support_requests ORDER BY created_at DESC LIMIT 100');
+  res.json({ requests: rows.map((row) => parsePayload(row.payload)) });
+}));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
 
@@ -1337,6 +1424,9 @@ app.get('*', (req, res) => {
 
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'That upload is too large. Send fewer or smaller photos.' });
+  }
   console.error(error);
   res.status(500).json({ error: 'The verification desk could not complete that request.' });
 });
@@ -1346,7 +1436,7 @@ initWithRetry().then((ready) => {
   app.listen(port, () => {
     console.log(`VerifyMyFlight desk listening on http://localhost:${port}`);
     console.log(`[db] Neon Postgres ${ready ? 'connected' : 'NOT connected'}`);
-    console.log(`[support] requests email to ${supportRecipient} via ${resendApiKey ? 'Resend' : supportFormEndpoint ? `relay ${supportFormEndpoint}` : 'no transport (not emailed)'}`);
+    console.log(`[support] requests email to ${supportRecipients.join(', ')} via ${resendApiKey ? 'Resend' : supportFormEndpoint ? 'the FormSubmit relay' : 'no transport (not emailed)'}`);
     if (usingDefaultCredentials) {
       console.warn('[admin] Using default sign-in admin@verifymyflight.local / verify-admin-2026 — set ADMIN_EMAIL and ADMIN_PASSWORD before deploying.');
     }

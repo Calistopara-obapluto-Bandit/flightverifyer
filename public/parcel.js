@@ -104,6 +104,21 @@ function renderTrack(shipment, checkedAt) {
       </div>
     </li>`).join('');
 
+  const photos = Array.isArray(shipment.images) ? shipment.images : [];
+  const photoSection = photos.length ? `
+      <section class="parcel-photos">
+        <div class="parcel-photos__head">
+          <h3>Parcel photos</h3>
+          <p class="mono">${photos.length} image${photos.length === 1 ? '' : 's'} · contents as dispatched</p>
+        </div>
+        <ul class="photo-grid">
+          ${photos.map((source, index) => `<li><figure>
+            <img src="${esc(source)}" alt="Parcel ${esc(shipment.trackingNumber)} photo ${index + 1}">
+            <figcaption class="mono">IMG-0${index + 1}</figcaption>
+          </figure></li>`).join('')}
+        </ul>
+      </section>` : '';
+
   const etaLine = delivered
     ? `Delivered ${formatMoment(shipment.deliveredAt || shipment.etaAt)}`
     : `Estimated ${formatMoment(shipment.etaAt, false)} · ${shipment.window}`;
@@ -200,6 +215,8 @@ function renderTrack(shipment, checkedAt) {
         ${partyMarkup('Sender', shipment.senderName, shipment.senderPhone, shipment.senderEmail)}
         ${partyMarkup('Recipient', shipment.recipientName, shipment.recipientPhone, shipment.recipientEmail)}
       </section>
+
+      ${photoSection}
 
       ${held && shipment.holdReason ? `<p class="parcel-alert"><b>On hold.</b> ${esc(shipment.holdReason)}</p>` : ''}
 

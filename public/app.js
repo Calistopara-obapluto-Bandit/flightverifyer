@@ -807,7 +807,10 @@ supportForm.addEventListener('submit', async (event) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || 'The desk could not accept that request.');
     supportForm.reset();
-    supportStatus.textContent = `Received. Quote reference ${payload.reference} when following up.`;
+    delete supportStatus.dataset.state;
+    supportStatus.textContent = payload.emailed
+      ? `Received. Quote reference ${payload.reference} when following up.`
+      : `Received. Quote reference ${payload.reference}. The desk inbox holds it until the mail relay confirms delivery.`;
   } catch (error) {
     supportStatus.dataset.state = 'error';
     supportStatus.textContent = error.message || 'The desk could not accept that request.';

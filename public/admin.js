@@ -52,6 +52,8 @@ function showConsole(email) {
   if (signedIn) signedIn.textContent = email ? `Signed in as ${email}` : '';
   if (email) signOut.dataset.email = email;
   loadRecords();
+  loadShipments();
+  loadSupport();
 }
 
 function showAuth() {
@@ -362,6 +364,100 @@ function renderShipments(shipments) {
   }).join('');
 }
 
+/* Parcel photos are resized in the browser so a record stays small and fast. */
+const photoInput = $('#shipment-photos');
+const photoStrip = $('#shipment-photo-strip');
+const photoStatus = $('#shipment-photo-status');
+const MAX_PHOTOS = 6;
+let shipmentPhotos = [];
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('That photo could not be read.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function encodePhoto(image, maxEdge, quality) {
+  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function preparePhoto(file) {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+    throw new Error(`${file.name} is not a PNG, JPEG or WebP image.`);
+  }
+  const source = await readAsDataUrl(file);
+  const image = await new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error(`${file.name} could not be opened.`));
+    element.src = source;
+  });
+  let dataUrl = encodePhoto(image, 1200, 0.72);
+  if (dataUrl.length > 700000) dataUrl = encodePhoto(image, 900, 0.6);
+  if (dataUrl.length > 700000) throw new Error(`${file.name} is too detailed to store — try a smaller photo.`);
+  return dataUrl;
+}
+
+function renderPhotos() {
+  if (!photoStrip) return;
+  photoStrip.innerHTML = shipmentPhotos.map((photo, index) => `
+    <li class="photo-tile">
+      <img src="${photo}" alt="Parcel photo ${index + 1}" loading="lazy">
+      <button type="button" class="photo-remove" data-remove-photo="${index}" aria-label="Remove photo ${index + 1}">×</button>
+    </li>`).join('');
+}
+
+if (photoInput) {
+  photoInput.addEventListener('change', async () => {
+    const files = Array.from(photoInput.files || []);
+    photoInput.value = '';
+    if (!files.length) return;
+    const room = MAX_PHOTOS - shipmentPhotos.length;
+    if (room <= 0) {
+      if (photoStatus) photoStatus.textContent = `A parcel carries at most ${MAX_PHOTOS} photos. Remove one first.`;
+      return;
+    }
+    if (photoStatus) photoStatus.textContent = 'Preparing photos…';
+    const problems = [];
+    for (const file of files.slice(0, room)) {
+      try {
+        shipmentPhotos.push(await preparePhoto(file));
+      } catch (error) {
+        problems.push(error.message);
+      }
+    }
+    if (files.length > room) problems.push(`Only ${room} more photo${room === 1 ? '' : 's'} fit on this parcel.`);
+    renderPhotos();
+    if (photoStatus) {
+      photoStatus.textContent = problems.length
+        ? problems.join(' ')
+        : `${shipmentPhotos.length} photo${shipmentPhotos.length === 1 ? '' : 's'} ready to send with the parcel.`;
+    }
+  });
+}
+
+if (photoStrip) {
+  photoStrip.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-photo]');
+    if (!button) return;
+    shipmentPhotos.splice(Number(button.dataset.removePhoto), 1);
+    renderPhotos();
+    if (photoStatus) {
+      photoStatus.textContent = shipmentPhotos.length
+        ? `${shipmentPhotos.length} photo${shipmentPhotos.length === 1 ? '' : 's'} ready to send with the parcel.`
+        : '';
+    }
+  });
+}
+
 if (shipmentForm) {
   shipmentForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -374,7 +470,11 @@ if (shipmentForm) {
         if (values[field] !== undefined && values[field] !== '') values[field] = Number(values[field]);
       }
       values.insured = shipmentForm.elements.insured?.checked === true;
+      values.images = shipmentPhotos.slice();
       const result = await api('/api/admin/shipments', { method: 'POST', body: JSON.stringify(values) });
+      shipmentPhotos = [];
+      renderPhotos();
+      if (photoStatus) photoStatus.textContent = '';
       setStatus(shipmentStatus, `Tracking number created · ${result.code}`);
       shipmentCode.textContent = result.code;
       shipmentOpen.href = `/track/${encodeURIComponent(result.code)}`;
@@ -450,3 +550,46 @@ shipmentsBody.addEventListener('click', async (event) => {
 });
 
 $('#refresh-shipments').addEventListener('click', loadShipments);
+
+/* ------------------------------------------------------------------ */
+/* Support inbox                                                       */
+/* ------------------------------------------------------------------ */
+
+const supportList = $('#support-list');
+
+async function loadSupport() {
+  if (!supportList) return;
+  try {
+    const { requests } = await api('/api/admin/support');
+    renderSupport(requests);
+  } catch (error) {
+    if (error.status === 401) {
+      showAuth();
+      return;
+    }
+    supportList.innerHTML = `<p class="table-empty">${esc(error.message)}</p>`;
+  }
+}
+
+function renderSupport(requests) {
+  if (!requests.length) {
+    supportList.innerHTML = '<p class="table-empty">No support requests yet.</p>';
+    return;
+  }
+  supportList.innerHTML = requests.map((request) => {
+    const when = request.createdAt
+      ? new Date(request.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '—';
+    return `<article class="support-card">
+      <header class="support-card__head">
+        <p class="support-card__ref mono">${esc(request.reference)}</p>
+        <p class="support-card__meta mono">${esc(when)} · ${esc(request.priority)} · ${request.emailed ? 'emailed' : 'not emailed'}</p>
+      </header>
+      <h3>${esc(request.category)}</h3>
+      <p class="support-card__from">${esc(request.name)} · <a href="mailto:${esc(request.email)}">${esc(request.email)}</a></p>
+      <p class="support-card__message">${esc(request.message)}</p>
+    </article>`;
+  }).join('');
+}
+
+if ($('#refresh-support')) $('#refresh-support').addEventListener('click', loadSupport);

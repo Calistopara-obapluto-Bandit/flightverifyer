@@ -726,3 +726,156 @@
   width: auto;
   accent-color: var(--signal);
 }
+
+/* Parcel photos */
+
+.field-note {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  max-width: 62ch;
+}
+
+.photo-upload {
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.photo-picker {
+  display: grid;
+  gap: 4px;
+  padding: 18px;
+  border: 1px dashed var(--ink-faint);
+  background: var(--paper);
+  cursor: pointer;
+  text-align: center;
+}
+
+.photo-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.photo-picker span {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.photo-picker small {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+
+.photo-picker:focus-within,
+.photo-picker:hover {
+  border-color: var(--ink);
+}
+
+.photo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+}
+
+.photo-tile {
+  position: relative;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.photo-tile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.photo-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  font: 600 13px/1 var(--mono);
+  cursor: pointer;
+}
+
+.photo-status {
+  margin: 12px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* Support inbox */
+
+.support-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.support-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink);
+  background: var(--paper);
+}
+
+.support-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.support-card__ref {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+}
+
+.support-card__meta {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.support-card h3 {
+  margin: 8px 0 4px;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.support-card__from {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.support-card__message {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .photo-upload { grid-template-columns: 1fr; }
+}

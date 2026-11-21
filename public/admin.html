@@ -296,6 +296,20 @@
             </div>
           </fieldset>
 
+          <fieldset class="form-section">
+            <legend><span class="mono">03</span> Parcel photos</legend>
+            <p class="field-note">Photograph the contents as they are packed. Up to six images; each is resized in the browser and stored with the parcel record so the recipient sees exactly what was shipped.</p>
+            <div class="photo-upload">
+              <label class="photo-picker" for="shipment-photos">
+                <input id="shipment-photos" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+                <span>Choose photos</span>
+                <small class="mono">PNG · JPEG · WebP — 6 max</small>
+              </label>
+              <ul class="photo-strip" id="shipment-photo-strip"></ul>
+            </div>
+            <p class="photo-status" id="shipment-photo-status" role="status" aria-live="polite"></p>
+          </fieldset>
+
           <div class="form-actions">
             <p class="form-status" id="shipment-status" role="status" aria-live="polite"></p>
             <button type="submit" class="btn btn-primary" id="shipment-submit">Create tracking number</button>
@@ -311,6 +325,20 @@
               <tr><td colspan="6" class="table-empty">Loading parcels…</td></tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="records" id="support-inbox">
+        <div class="records-head">
+          <div>
+            <p class="eyebrow"><span>04</span> Support inbox</p>
+            <h2 class="records-title">Requests from the public desk</h2>
+            <p class="console-note">Every support submission is kept here even when mail delivery is not configured, so nothing is lost.</p>
+          </div>
+          <button type="button" class="btn btn-ghost btn-small" id="refresh-support">Refresh</button>
+        </div>
+        <div class="support-list" id="support-list">
+          <p class="table-empty">Loading requests…</p>
         </div>
       </section>
     </section>
