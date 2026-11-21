@@ -1,5 +1,5 @@
 {
-  "name": "verifymyflight",
+  "name": "airopack",
   "version": "1.0.0",
   "private": true,
   "description": "Flight booking verification desk with live telemetry dossiers and a Neon Postgres ledger.",

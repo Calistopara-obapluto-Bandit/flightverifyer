@@ -65,7 +65,7 @@ function watermarkMarkup() {
   const marks = Array.from({ length: 15 }, () => `
     <div class="print-watermark__mark">
       <span class="print-watermark__rule"></span>
-      <span class="print-watermark__word">flightverifyer</span>
+      <span class="print-watermark__word">airopack</span>
       <span class="print-watermark__tag">VERIFICATION LEDGER</span>
     </div>`).join('');
   return `<div class="print-watermark" aria-hidden="true">${marks}</div>`;
@@ -232,7 +232,7 @@ function renderTrack(shipment, checkedAt) {
 
       <footer class="parcel-foot">
         ${barcodeMarkup(shipment.trackingNumber)}
-        <p class="mono">Checked ${esc(formatMoment(checkedAt))} UTC · VerifyMyFlight parcel desk</p>
+        <p class="mono">Checked ${esc(formatMoment(checkedAt))} UTC · AiroPack parcel desk</p>
       </footer>
     </article>`;
 }

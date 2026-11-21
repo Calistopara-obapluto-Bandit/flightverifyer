@@ -97,7 +97,7 @@ async function verify(rawCode) {
       history.pushState({ code: payload.booking.bookingReference }, '', dossierPath);
     }
     document.body.classList.add('verify-page');
-    document.title = `Dossier ${payload.booking.bookingReference} · VerifyMyFlight`;
+    document.title = `Dossier ${payload.booking.bookingReference} · AiroPack`;
     renderDossier(payload.booking, payload);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (error) {
@@ -275,7 +275,7 @@ function renderDossier(booking, payload) {
       ${`
       <span class="print-watermark__mark">
         <span class="print-watermark__rule" aria-hidden="true"></span>
-        <span class="print-watermark__word">flightverifyer</span>
+        <span class="print-watermark__word">airopack</span>
         <span class="print-watermark__tag">Verification ledger</span>
       </span>`.repeat(15)}
     </div>`;
@@ -290,7 +290,7 @@ function renderDossier(booking, payload) {
     <article class="dossier">
       <header class="dossier-masthead">
         <div>
-          <p class="print-brand">flightverifyer</p>
+          <p class="print-brand">airopack</p>
           <p class="eyebrow"><span>05</span> Verification dossier</p>
           <h2 class="dossier-title">${esc(booking.bookingReference)}</h2>
           <p class="dossier-sub">${esc(booking.airline)} ${esc(booking.flightNumber)} · ${esc(departure.iata)} → ${esc(arrival.iata)} · ${passengers.length} passenger${passengers.length === 1 ? '' : 's'}</p>
@@ -863,7 +863,7 @@ function showHome() {
   state.booking = null;
   els.result.innerHTML = '';
   setStatus('');
-  document.title = 'VerifyMyFlight — Booking verification desk';
+  document.title = 'AiroPack — Booking verification desk';
 }
 
 function renderVerifyError(message, code) {

@@ -898,7 +898,7 @@ const supportRecipients = String(process.env.SUPPORT_EMAIL || 'support.sbiamauto
   .map((address) => address.trim())
   .filter(Boolean);
 const supportRecipient = supportRecipients[0];
-const supportSender = String(process.env.SUPPORT_FROM || 'flightverifyer desk <onboarding@resend.dev>').trim();
+const supportSender = String(process.env.SUPPORT_FROM || 'airopack desk <onboarding@resend.dev>').trim();
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
 
 // Render's free tier blocks outbound SMTP, so without a Resend key the request
@@ -996,7 +996,7 @@ async function emailSupportRequest(request) {
   const html = `<!doctype html><html><body style="margin:0;padding:28px;background:#f7f2e8">
   <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;margin:0 auto;background:#fffdf8;border:1px solid #e3dbca;border-top:3px solid #d9481f">
     <tr><td style="padding:22px 24px;border-bottom:1px solid #efe7d7">
-      <p style="margin:0;font:11px/1.4 Helvetica,Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:#7b7466">flightverifyer · support desk</p>
+      <p style="margin:0;font:11px/1.4 Helvetica,Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:#7b7466">airopack · support desk</p>
       <h1 style="margin:8px 0 0;font:400 25px/1.2 Georgia,'Times New Roman',serif;color:#16211f">New support request</h1>
       <p style="margin:6px 0 0;font:13px/1.5 Helvetica,Arial,sans-serif;color:#5b665f">Ticket <b>${escapeHtml(request.reference)}</b> · ${escapeHtml(request.category)}</p>
     </td></tr>
@@ -1006,7 +1006,7 @@ async function emailSupportRequest(request) {
       <div style="padding:16px;background:#faf6ec;border-left:2px solid #d9481f;font:14px/1.65 Helvetica,Arial,sans-serif;color:#16211f;white-space:pre-wrap">${escapeHtml(request.message)}</div>
       <p style="margin:20px 0 0;font:12px/1.6 Helvetica,Arial,sans-serif;color:#5b665f">Reply directly to this email to answer <b>${escapeHtml(request.name)}</b> at ${escapeHtml(request.email)}.</p>
     </td></tr>
-    <tr><td style="padding:14px 24px;border-top:1px solid #efe7d7;font:10px/1.6 Helvetica,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9a9285">flightverifyer · verification ledger</td></tr>
+    <tr><td style="padding:14px 24px;border-top:1px solid #efe7d7;font:10px/1.6 Helvetica,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9a9285">airopack · verification ledger</td></tr>
   </table>
 </body></html>`;
 
@@ -1308,7 +1308,7 @@ const normaliseCode = (value) => String(value || '').trim().toUpperCase().replac
    Neon free-tier compute hours. */
 app.get('/api/ping', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ ok: true, service: 'verifymyflight', uptime: Math.round(process.uptime()) });
+  res.json({ ok: true, service: 'airopack', uptime: Math.round(process.uptime()) });
 });
 
 app.get('/api/health', asyncRoute(async (req, res) => {
@@ -1332,7 +1332,7 @@ app.get('/api/verify/:code', requireDatabase, asyncRoute(async (req, res) => {
   res.json({
     booking: decorateBooking(booking),
     verifiedAt: new Date().toISOString(),
-    source: 'VerifyMyFlight verification ledger'
+    source: 'AiroPack verification ledger'
   });
 }));
 
@@ -1349,7 +1349,7 @@ app.get('/api/track/:code', requireDatabase, asyncRoute(async (req, res) => {
   res.json({
     shipment: decorateShipment(shipment),
     checkedAt: new Date().toISOString(),
-    source: 'VerifyMyFlight parcel desk'
+    source: 'AiroPack parcel desk'
   });
 }));
 
@@ -1434,7 +1434,7 @@ app.use((error, req, res, next) => {
 initWithRetry().then((ready) => {
   databaseReady = ready;
   app.listen(port, () => {
-    console.log(`VerifyMyFlight desk listening on http://localhost:${port}`);
+    console.log(`AiroPack desk listening on http://localhost:${port}`);
     console.log(`[db] Neon Postgres ${ready ? 'connected' : 'NOT connected'}`);
     console.log(`[support] requests email to ${supportRecipients.join(', ')} via ${resendApiKey ? 'Resend' : supportFormEndpoint ? 'the FormSubmit relay' : 'no transport (not emailed)'}`);
     if (usingDefaultCredentials) {
