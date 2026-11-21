@@ -52,6 +52,14 @@ async function initDatabase() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS shipments (
+      code TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   const { rows } = await pool.query('SELECT COUNT(*) AS count FROM bookings');
   if (Number(rows[0].count) === 0) {
     const now = Date.now();
@@ -79,6 +87,31 @@ async function initDatabase() {
       );
     }
     console.log(`[db] seeded ${Object.keys(seedBookings).length} verification records`);
+  }
+
+  const shipments = await pool.query('SELECT COUNT(*) AS count FROM shipments');
+  if (Number(shipments.rows[0].count) === 0) {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const sample = buildShipment({
+      service: 'Shiparox Express',
+      origin: 'Lagos, Nigeria',
+      destination: 'London, United Kingdom',
+      senderName: 'Adeola Ogun',
+      recipientName: 'Grace Whitfield',
+      contents: 'Documents and sample kit',
+      reference: 'PO-4417',
+      weightKg: 4.2,
+      pieces: 2,
+      status: 'in_transit',
+      registeredAt: new Date(now - 26 * hour).toISOString(),
+      etaAt: new Date(now + 22 * hour).toISOString()
+    }, 'SHPX-HGV3MQ');
+    await pool.query(
+      'INSERT INTO shipments (code, payload, created_at) VALUES ($1, $2::jsonb, $3)',
+      [sample.trackingNumber, JSON.stringify(sample), sample.createdAt]
+    );
+    console.log('[db] seeded tracking sample SHPX-HGV3MQ');
   }
 
   const backfilled = await backfillTimelines();
@@ -610,6 +643,144 @@ async function buildBooking(input) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Parcel tracking                                                     */
+/* ------------------------------------------------------------------ */
+
+const shipmentStatuses = ['registered', 'in_transit', 'out_for_delivery', 'delivered', 'on_hold'];
+
+const shipmentStatusLabels = {
+  registered: 'REGISTERED',
+  in_transit: 'IN TRANSIT',
+  out_for_delivery: 'OUT FOR DELIVERY',
+  delivered: 'DELIVERED',
+  on_hold: 'ON HOLD'
+};
+
+const shipmentProgress = {
+  registered: 8,
+  in_transit: 48,
+  out_for_delivery: 84,
+  delivered: 100,
+  on_hold: 48
+};
+
+async function readShipmentRow(code) {
+  if (!code) return null;
+  const { rows } = await pool.query('SELECT payload FROM shipments WHERE code = $1', [code]);
+  return rows[0]?.payload ? parsePayload(rows[0].payload) : null;
+}
+
+async function allShipments() {
+  const { rows } = await pool.query('SELECT payload, created_at FROM shipments ORDER BY created_at DESC');
+  return rows.map((row) => ({
+    ...parsePayload(row.payload),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
+  }));
+}
+
+async function uniqueShipmentCode() {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const code = `SHPX-${randomFrom(CODE_ALPHABET, 6)}`;
+    if (!(await readShipmentRow(code))) return code;
+  }
+  throw new Error('Could not allocate a unique tracking number.');
+}
+
+function isoOr(value, fallback) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+// The scan history is derived from the parcel's stage, so the desk only ever
+// moves a shipment between stages instead of editing individual scans.
+function shipmentEvents(shipment) {
+  const registered = Date.parse(shipment.registeredAt) || Date.now();
+  const eta = Date.parse(shipment.etaAt) || registered + 72 * 60 * 60 * 1000;
+  const deliveredAt = Date.parse(shipment.deliveredAt);
+  // Scans never run ahead of the clock, and a delivered parcel's history stops
+  // at the moment it was signed for.
+  const horizon = shipment.status === 'delivered' && Number.isFinite(deliveredAt)
+    ? deliveredAt
+    : Math.min(eta, Date.now());
+  // Scans are spread backwards from the horizon so a parcel dispatched and
+  // delivered minutes later still shows a believable sequence.
+  const span = Math.max(horizon - registered, 6 * 60 * 60 * 1000);
+  const at = (fraction) => new Date(Math.max(registered, horizon - (1 - fraction) * span)).toISOString();
+  const pieceLine = `${shipment.pieces} piece${shipment.pieces === 1 ? '' : 's'} · ${shipment.weightKg} kg`;
+  const events = [
+    { at: new Date(Math.min(registered, horizon)).toISOString(), label: 'Shipment information received', location: shipment.origin, note: 'Label created and data transmitted to the network.' },
+    { at: at(0.16), label: 'Picked up from sender', location: shipment.origin, note: pieceLine },
+    { at: at(0.38), label: 'Departed origin facility', location: shipment.origin, note: 'Loaded for linehaul to the destination country.' }
+  ];
+
+  if (shipment.status !== 'registered') {
+    events.push({ at: at(0.58), label: 'Arrived at transit hub', location: shipment.hub, note: 'Scanned in and sorted for onward carriage.' });
+  }
+  if (shipment.status === 'out_for_delivery' || shipment.status === 'delivered') {
+    events.push({ at: at(0.9), label: 'Out for delivery', location: shipment.destination, note: 'With the delivery courier for the final leg.' });
+  }
+  if (shipment.status === 'delivered') {
+    events.push({
+      at: new Date(horizon).toISOString(),
+      label: 'Delivered · signed for',
+      location: shipment.destination,
+      note: `Received by ${shipment.recipientName}.`
+    });
+  }
+  if (shipment.status === 'on_hold') {
+    events.push({
+      at: new Date(Math.min(Date.parse(shipment.updatedAt) || Date.now(), Date.now())).toISOString(),
+      label: 'Held at facility',
+      location: shipment.destination,
+      note: shipment.holdReason || 'Awaiting clearance or recipient instruction.'
+    });
+  }
+
+  return events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+function decorateShipment(shipment) {
+  const status = shipmentStatuses.includes(shipment.status) ? shipment.status : 'registered';
+  const events = shipmentEvents({ ...shipment, status });
+  return {
+    ...shipment,
+    status,
+    statusLabel: shipmentStatusLabels[status],
+    progress: shipmentProgress[status],
+    events: events.slice().reverse(),
+    lastEvent: events[events.length - 1] || null
+  };
+}
+
+function buildShipment(input, code) {
+  const now = new Date().toISOString();
+  const status = shipmentStatuses.includes(text(input.status, 20)) ? text(input.status, 20) : 'registered';
+  const registeredAt = isoOr(input.registeredAt, now);
+  const etaAt = isoOr(input.etaAt, new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString());
+  const shipment = {
+    trackingNumber: code || `SHPX-${randomFrom(CODE_ALPHABET, 6)}`,
+    status,
+    service: text(input.service, 60) || 'Shiparox Express',
+    reference: text(input.reference, 40),
+    origin: text(input.origin, 90),
+    destination: text(input.destination, 90),
+    hub: text(input.hub, 90) || 'Regional transit hub',
+    senderName: text(input.senderName, 80),
+    recipientName: text(input.recipientName, 80),
+    contents: text(input.contents, 120),
+    pieces: integer(input.pieces, 1, 1, 999),
+    weightKg: decimal(input.weightKg, 1),
+    registeredAt,
+    etaAt,
+    deliveredAt: status === 'delivered' ? isoOr(input.deliveredAt, now) : null,
+    holdReason: text(input.holdReason, 120),
+    createdAt: now,
+    updatedAt: now
+  };
+  return { ...shipment, events: shipmentEvents(shipment) };
+}
+
+/* ------------------------------------------------------------------ */
 /* App setup                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -659,6 +830,10 @@ const supportFormEndpoint = (() => {
   return `https://formsubmit.co/ajax/${supportRecipient}`;
 })();
 
+// The relay only accepts browser-shaped posts, so present one.
+const supportFormOrigin = String(process.env.SUPPORT_FORM_ORIGIN || 'https://flightverifyer.onrender.com').replace(/\/$/, '');
+const BROWSER_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;',
   '<': '&lt;',
@@ -670,7 +845,13 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
 async function sendViaFormRelay(request, subject) {
   const response = await fetch(supportFormEndpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Origin: supportFormOrigin,
+      Referer: `${supportFormOrigin}/`,
+      'User-Agent': BROWSER_UA
+    },
     body: JSON.stringify({
       _subject: subject,
       _template: 'table',
@@ -687,9 +868,9 @@ async function sendViaFormRelay(request, subject) {
     signal: AbortSignal.timeout(10_000)
   });
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Mail relay responded ${response.status}: ${detail.slice(0, 300)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || String(payload.success) === 'false') {
+    throw new Error(payload.message || `Mail relay responded ${response.status}`);
   }
 
   return true;
@@ -905,6 +1086,77 @@ app.delete('/api/admin/bookings/:code', requireAdmin, requireDatabase, asyncRout
   res.json({ deleted: code });
 }));
 
+app.get('/api/admin/shipments', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const rows = (await allShipments()).map((raw) => {
+    const shipment = decorateShipment(raw);
+    return {
+      code: shipment.trackingNumber,
+      service: shipment.service,
+      route: `${shipment.origin} → ${shipment.destination}`,
+      recipient: shipment.recipientName,
+      status: shipment.statusLabel,
+      statusKey: shipment.status,
+      eta: shipment.etaAt,
+      createdAt: shipment.createdAt || shipment.registeredAt
+    };
+  });
+  res.json({ shipments: rows });
+}));
+
+app.post('/api/admin/shipments', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const input = req.body || {};
+  const required = {
+    origin: 'origin',
+    destination: 'destination',
+    recipientName: 'recipient name',
+    contents: 'contents'
+  };
+  const missing = Object.entries(required)
+    .filter(([key]) => text(input[key]).length === 0)
+    .map(([, label]) => label);
+  if (missing.length) {
+    return res.status(400).json({ error: `Complete these fields: ${missing.join(', ')}.` });
+  }
+  if (text(input.etaAt) && !Number.isFinite(Date.parse(text(input.etaAt)))) {
+    return res.status(400).json({ error: 'Estimated delivery must use the date picker.' });
+  }
+
+  const code = await uniqueShipmentCode();
+  const shipment = buildShipment(input, code);
+  await pool.query(
+    'INSERT INTO shipments (code, payload, created_at) VALUES ($1, $2::jsonb, $3)',
+    [code, JSON.stringify(shipment), shipment.createdAt]
+  );
+  res.status(201).json({ code, shipment: decorateShipment(shipment) });
+}));
+
+app.patch('/api/admin/shipments/:code', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const status = String(req.body?.status || '');
+  if (!shipmentStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Choose registered, in transit, out for delivery, delivered or on hold.' });
+  }
+  const shipment = await readShipmentRow(code);
+  if (!shipment) return res.status(404).json({ error: 'Shipment not found.' });
+  const updated = {
+    ...shipment,
+    status,
+    updatedAt: new Date().toISOString(),
+    deliveredAt: status === 'delivered' ? (shipment.deliveredAt || new Date().toISOString()) : null,
+    holdReason: status === 'on_hold' ? (text(req.body?.holdReason, 120) || shipment.holdReason) : ''
+  };
+  updated.events = shipmentEvents(updated);
+  await pool.query('UPDATE shipments SET payload = $2::jsonb WHERE code = $1', [code, JSON.stringify(updated)]);
+  res.json({ code, shipment: decorateShipment(updated) });
+}));
+
+app.delete('/api/admin/shipments/:code', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const result = await pool.query('DELETE FROM shipments WHERE code = $1', [code]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Shipment not found.' });
+  res.json({ deleted: code });
+}));
+
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
@@ -914,6 +1166,11 @@ app.use(express.static(publicDirectory, { extensions: ['html'] }));
 // Dedicated verification page; the client app renders the dossier for this path.
 app.get('/verify/:code', (req, res) => {
   res.sendFile(path.join(publicDirectory, 'index.html'));
+});
+
+// Parcel tracking lives on its own page, separate from the flight dossier.
+app.get('/track/:code', (req, res) => {
+  res.sendFile(path.join(publicDirectory, 'track.html'));
 });
 
 const normaliseCode = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
@@ -948,6 +1205,23 @@ app.get('/api/verify/:code', requireDatabase, asyncRoute(async (req, res) => {
     booking: decorateBooking(booking),
     verifiedAt: new Date().toISOString(),
     source: 'VerifyMyFlight verification ledger'
+  });
+}));
+
+app.get('/api/track/:code', requireDatabase, asyncRoute(async (req, res) => {
+  const code = normaliseCode(req.params.code);
+  if (!/^SHPX-[A-Z0-9]{4,10}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter a tracking number in the form SHPX-XXXXXX.' });
+  }
+  const shipment = await readShipmentRow(code);
+  if (!shipment) {
+    return res.status(404).json({ error: `No parcel matches ${code}. Check the number and try again, or contact the support desk.` });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    shipment: decorateShipment(shipment),
+    checkedAt: new Date().toISOString(),
+    source: 'VerifyMyFlight parcel desk'
   });
 }));
 

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Track a parcel — VerifyMyFlight</title>
+  <meta name="description" content="Track a parcel against the dispatch ledger. Enter the SHPX tracking number to open the routing, scan history and delivery estimate.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#16211f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/" aria-label="VerifyMyFlight home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M4 22.5 13.5 9l7 10.5L28 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13.5" cy="9" r="2.4" fill="currentColor"/><circle cx="28" cy="6" r="2.4" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-name">Verify<em>MyFlight</em></span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <a class="nav-link" href="/">Flight verification</a>
+        <a class="nav-link is-active" href="/track" aria-current="page">Track a parcel</a>
+      </nav>
+      <p class="ledger-state"><span class="pulse" aria-hidden="true"></span> Parcel desk online</p>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero shell" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span>05</span> Parcel tracking desk</p>
+        <h1>Where is<br><em>my parcel?</em></h1>
+        <p class="lede">Enter the tracking number printed on the dispatch note. We read it against the parcel ledger and open the routing, every scan, and the delivery estimate the desk holds for it.</p>
+
+        <form id="track-form" class="verify" novalidate>
+          <label for="track-code">Tracking number</label>
+          <div class="verify-row">
+            <input id="track-code" name="code" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="SHPX-HGV3MQ" aria-describedby="track-hint">
+            <button id="track-button" type="submit" class="btn btn-primary">Track parcel</button>
+          </div>
+          <div class="verify-foot">
+            <p id="track-hint">Sample parcel: <button type="button" class="sample" data-sample="SHPX-HGV3MQ">SHPX-HGV3MQ</button></p>
+            <p class="verify-status" id="track-status" role="status" aria-live="polite"></p>
+          </div>
+        </form>
+
+        <dl class="stats">
+          <div><dt>Parcels in the ledger</dt><dd>One record per code</dd></div>
+          <div><dt>Scan history</dt><dd>Live</dd></div>
+          <div><dt>Codes issued</dt><dd>SHPX</dd></div>
+        </dl>
+      </div>
+
+      <aside class="hero-board" aria-hidden="true">
+        <div class="board-card">
+          <div class="board-head">
+            <span class="mono">Dispatch preview · SHPX</span>
+            <span class="board-live"><span class="pulse"></span>live</span>
+          </div>
+          <p class="board-route">LOS <span class="board-arc"><svg viewBox="0 0 160 40" preserveAspectRatio="none"><path d="M4 34C46 2 112 2 156 26" stroke="currentColor" stroke-width="1.6" fill="none" stroke-dasharray="5 5"/><circle cx="4" cy="34" r="3" fill="currentColor"/><circle cx="156" cy="26" r="3" fill="currentColor"/><path d="m100 11 9 2-5 8z" fill="currentColor"/></svg></span> LHR</p>
+          <div class="board-rows">
+            <div><span>Service</span><b>Express</b></div>
+            <div><span>Pieces</span><b>2</b></div>
+            <div><span>Weight</span><b>4.2 kg</b></div>
+            <div><span>Last scan</span><b>Transit hub</b></div>
+          </div>
+          <div class="board-progress"><span style="width:48%"></span></div>
+          <div class="board-foot"><span class="mono">48% journey</span><span class="mono">Signed on delivery</span></div>
+        </div>
+        <div class="board-ledger">
+          <div><span>Parcel state</span><b>In transit</b></div>
+          <div><span>Scan sync</span><b>&lt; 2 s</b></div>
+          <div><span>Codes</span><b>SHPX-XXXXXX</b></div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="track-result" class="result shell" aria-live="polite"></section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <p>VerifyMyFlight · Parcel tracking desk</p>
+      <p class="mono">Scans are taken from the dispatch ledger at the moment you check.</p>
+      <p><a class="link-button" href="/">Flight verification</a> · <a class="link-button" href="/#support">Support desk</a></p>
+    </div>
+  </footer>
+
+  <script src="/track.js" defer></script>
+</body>
+</html>

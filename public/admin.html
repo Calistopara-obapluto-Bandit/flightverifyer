@@ -221,6 +221,79 @@
           </table>
         </div>
       </section>
+
+      <section class="records" id="parcel-desk">
+        <div class="records-head">
+          <div>
+            <p class="eyebrow"><span>03</span> Parcel desk</p>
+            <h2 class="records-title">Issue a tracking number</h2>
+            <p class="console-note">Every parcel receives a unique <b>SHPX-</b> number. The recipient opens <b>/track</b> and enters it to follow the journey.</p>
+          </div>
+          <button type="button" class="btn btn-ghost btn-small" id="refresh-shipments">Refresh</button>
+        </div>
+
+        <section class="issue-panel" id="shipment-issued" hidden aria-live="polite">
+          <div>
+            <p class="eyebrow"><span>✓</span> Tracking number issued</p>
+            <p class="issue-code" id="shipment-code">SHPX-XXXXXX</p>
+            <p class="issue-note">Send this number to the recipient. It opens the parcel page at <b>/track</b>.</p>
+          </div>
+          <div class="issue-actions">
+            <button type="button" class="btn btn-primary btn-small" id="shipment-copy">Copy tracking link</button>
+            <a class="btn btn-ghost btn-small" id="shipment-open" href="#" target="_blank" rel="noopener">Open tracking page ↗</a>
+          </div>
+        </section>
+
+        <form id="shipment-form" class="create-form" novalidate>
+          <fieldset class="form-section">
+            <legend><span class="mono">01</span> Route</legend>
+            <div class="field-grid field-grid--3">
+              <label>Service<input name="service" value="Shiparox Express" maxlength="60"></label>
+              <label>Origin (city, country)<input name="origin" required value="Lagos, Nigeria" maxlength="90"></label>
+              <label>Destination (city, country)<input name="destination" required value="London, United Kingdom" maxlength="90"></label>
+              <label>Transit hub<input name="hub" value="Regional transit hub" maxlength="90"></label>
+              <label>Customer reference<input name="reference" placeholder="PO-4417" maxlength="40"></label>
+              <label>Status
+                <select name="status">
+                  <option value="registered">Registered</option>
+                  <option value="in_transit" selected>In transit</option>
+                  <option value="out_for_delivery">Out for delivery</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="on_hold">On hold</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend><span class="mono">02</span> Parcel &amp; parties</legend>
+            <div class="field-grid field-grid--3">
+              <label>Sender name<input name="senderName" value="Adeola Ogun" maxlength="80"></label>
+              <label>Recipient name<input name="recipientName" required value="Grace Whitfield" maxlength="80"></label>
+              <label>Contents<input name="contents" required value="Documents and sample kit" maxlength="120"></label>
+              <label>Pieces<input name="pieces" type="number" min="1" max="999" value="1"></label>
+              <label>Weight (kg)<input name="weightKg" type="number" min="0.1" step="0.1" value="2.5"></label>
+              <label>Estimated delivery<input name="etaAt" type="date" id="eta-date"></label>
+            </div>
+          </fieldset>
+
+          <div class="form-actions">
+            <p class="form-status" id="shipment-status" role="status" aria-live="polite"></p>
+            <button type="submit" class="btn btn-primary" id="shipment-submit">Create tracking number</button>
+          </div>
+        </form>
+
+        <div class="table-wrap">
+          <table class="records-table">
+            <thead>
+              <tr><th>Tracking no.</th><th>Route</th><th>Recipient</th><th>Status</th><th>ETA</th><th><span class="visually-hidden">Actions</span></th></tr>
+            </thead>
+            <tbody id="shipments-body">
+              <tr><td colspan="6" class="table-empty">Loading parcels…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   </main>
 

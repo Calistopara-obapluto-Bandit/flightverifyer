@@ -69,8 +69,8 @@ function setStatus(element, message, isError = false) {
   }
 }
 
-function copyLink(code) {
-  const link = `${location.origin}/verify/${encodeURIComponent(code)}`;
+function copyLink(code, base = '/verify') {
+  const link = `${location.origin}${base}/${encodeURIComponent(code)}`;
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(link);
   }
@@ -291,3 +291,161 @@ if (dateField && !dateField.value) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   dateField.value = tomorrow.toISOString().slice(0, 10);
 }
+
+/* ------------------------------------------------------------------ */
+/* Parcel desk                                                         */
+/* ------------------------------------------------------------------ */
+
+const shipmentForm = $('#shipment-form');
+const shipmentStatus = $('#shipment-status');
+const shipmentSubmit = $('#shipment-submit');
+const shipmentsBody = $('#shipments-body');
+const shipmentIssued = $('#shipment-issued');
+const shipmentCode = $('#shipment-code');
+const shipmentCopy = $('#shipment-copy');
+const shipmentOpen = $('#shipment-open');
+const etaField = $('#eta-date');
+
+if (etaField && !etaField.value) {
+  const inThreeDays = new Date();
+  inThreeDays.setDate(inThreeDays.getDate() + 3);
+  etaField.value = inThreeDays.toISOString().slice(0, 10);
+}
+
+async function loadShipments() {
+  try {
+    const { shipments } = await api('/api/admin/shipments');
+    renderShipments(shipments);
+  } catch (error) {
+    if (error.status === 401) {
+      showAuth();
+      return;
+    }
+    shipmentsBody.innerHTML = `<tr><td colspan="6" class="table-empty">${esc(error.message)}</td></tr>`;
+  }
+}
+
+const shipmentStatusOptions = {
+  registered: 'Registered',
+  in_transit: 'In transit',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  on_hold: 'On hold'
+};
+
+function renderShipments(shipments) {
+  if (!shipments.length) {
+    shipmentsBody.innerHTML = '<tr><td colspan="6" class="table-empty">No parcels yet. Create the first tracking number above.</td></tr>';
+    return;
+  }
+  shipmentsBody.innerHTML = shipments.map((shipment) => {
+    const eta = shipment.eta ? new Date(shipment.eta).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric'
+    }) : '—';
+    return `<tr>
+      <td class="code">${esc(shipment.code)}</td>
+      <td>${esc(shipment.route)}<br><span class="mono">${esc(shipment.service)}</span></td>
+      <td>${esc(shipment.recipient)}</td>
+      <td class="mono status-cell status-cell--${esc(shipment.statusKey)}">${esc(shipment.status)}</td>
+      <td class="mono">${esc(eta)}</td>
+      <td>
+        <div class="row-actions">
+          <select class="outcome-select" data-shipment-code="${esc(shipment.code)}" aria-label="Parcel status for ${esc(shipment.code)}">
+            ${Object.entries(shipmentStatusOptions).map(([value, label]) => `<option value="${value}"${shipment.statusKey === value ? ' selected' : ''}>${label}</option>`).join('')}
+          </select>
+          <button type="button" class="mini-button" data-copy-track="${esc(shipment.code)}">Copy link</button>
+          <a class="mini-button" href="/track/${encodeURIComponent(shipment.code)}" target="_blank" rel="noopener">Open</a>
+          <button type="button" class="mini-button danger" data-delete-shipment="${esc(shipment.code)}">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+if (shipmentForm) {
+  shipmentForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    shipmentSubmit.disabled = true;
+    shipmentSubmit.textContent = 'Creating…';
+    setStatus(shipmentStatus, '');
+    try {
+      const values = Object.fromEntries(new FormData(shipmentForm));
+      for (const field of ['pieces', 'weightKg']) {
+        if (values[field] !== undefined && values[field] !== '') values[field] = Number(values[field]);
+      }
+      const result = await api('/api/admin/shipments', { method: 'POST', body: JSON.stringify(values) });
+      setStatus(shipmentStatus, `Tracking number created · ${result.code}`);
+      shipmentCode.textContent = result.code;
+      shipmentOpen.href = `/track/${encodeURIComponent(result.code)}`;
+      shipmentIssued.hidden = false;
+      shipmentIssued.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await loadShipments();
+    } catch (error) {
+      setStatus(shipmentStatus, error.message, true);
+      if (error.status === 401) showAuth();
+    } finally {
+      shipmentSubmit.disabled = false;
+      shipmentSubmit.textContent = 'Create tracking number';
+    }
+  });
+}
+
+shipmentCopy.addEventListener('click', async () => {
+  try {
+    await copyLink(shipmentCode.textContent.trim(), '/track');
+    shipmentCopy.textContent = 'Link copied ✓';
+    window.setTimeout(() => { shipmentCopy.textContent = 'Copy tracking link'; }, 2200);
+  } catch {
+    shipmentCopy.textContent = 'Copy failed';
+  }
+});
+
+shipmentsBody.addEventListener('change', async (event) => {
+  const select = event.target.closest('[data-shipment-code]');
+  if (!select) return;
+  const code = select.dataset.shipmentCode;
+  select.disabled = true;
+  select.dataset.state = 'saving';
+  try {
+    await api(`/api/admin/shipments/${encodeURIComponent(code)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: select.value })
+    });
+    select.dataset.state = 'saved';
+    window.setTimeout(() => { delete select.dataset.state; }, 1600);
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    select.disabled = false;
+  }
+});
+
+shipmentsBody.addEventListener('click', async (event) => {
+  const copyButton = event.target.closest('[data-copy-track]');
+  if (copyButton) {
+    try {
+      await copyLink(copyButton.dataset.copyTrack, '/track');
+      copyButton.textContent = 'Copied ✓';
+      window.setTimeout(() => { copyButton.textContent = 'Copy link'; }, 2000);
+    } catch {
+      copyButton.textContent = 'Failed';
+    }
+    return;
+  }
+
+  const deleteButton = event.target.closest('[data-delete-shipment]');
+  if (!deleteButton) return;
+  const code = deleteButton.dataset.deleteShipment;
+  if (!window.confirm(`Delete parcel ${code}? The tracking link will stop resolving.`)) return;
+  deleteButton.disabled = true;
+  try {
+    await api(`/api/admin/shipments/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    await loadShipments();
+    if (shipmentCode.textContent.trim() === code) shipmentIssued.hidden = true;
+  } catch (error) {
+    window.alert(error.message);
+    deleteButton.disabled = false;
+  }
+});
+
+$('#refresh-shipments').addEventListener('click', loadShipments);
