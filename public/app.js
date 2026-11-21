@@ -270,6 +270,11 @@ function renderDossier(booking, payload) {
       </div>
     </div>`;
 
+  const watermark = `
+    <div class="print-watermark" aria-hidden="true">
+      ${Array.from({ length: 24 }, () => '<span>flightverifyer</span>').join('')}
+    </div>`;
+
   const toolbar = `
     <div class="dossier-toolbar">
       <button type="button" class="back-link" data-action="home"><span aria-hidden="true">←</span> Verification desk</button>
@@ -280,6 +285,7 @@ function renderDossier(booking, payload) {
     <article class="dossier">
       <header class="dossier-masthead">
         <div>
+          <p class="print-brand">flightverifyer</p>
           <p class="eyebrow"><span>05</span> Verification dossier</p>
           <h2 class="dossier-title">${esc(booking.bookingReference)}</h2>
           <p class="dossier-sub">${esc(booking.airline)} ${esc(booking.flightNumber)} · ${esc(departure.iata)} → ${esc(arrival.iata)} · ${passengers.length} passenger${passengers.length === 1 ? '' : 's'}</p>
@@ -413,7 +419,7 @@ function renderDossier(booking, payload) {
 
   stopAllRadars();
   radarClocks.clear();
-  els.result.innerHTML = toolbar + html;
+  els.result.innerHTML = toolbar + watermark + html;
   mountRadar({
     canvas: $('#live-map-canvas'),
     readout: $('#live-map-readout'),

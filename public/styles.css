@@ -2192,9 +2192,56 @@ body.verify-page .result {
   }
 }
 
+/* Print-only brand line and repeating watermark (every printed page) */
+
+.print-brand,
+.print-watermark {
+  display: none;
+}
+
 @media print {
   .dossier-toolbar,
   .today-chip {
     display: none !important;
+  }
+
+  .print-brand {
+    display: block;
+    margin: 0 0 10px;
+    font-family: var(--serif);
+    font-size: 20px;
+    letter-spacing: -0.01em;
+    color: #000;
+  }
+
+  .print-watermark {
+    display: grid;
+    position: fixed;
+    inset: -12% -18%;
+    grid-template-columns: repeat(3, 1fr);
+    align-content: space-around;
+    justify-items: center;
+    gap: 0;
+    transform: rotate(-28deg);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.12;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-watermark span {
+    font-family: var(--mono);
+    font-size: 30px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #000;
+  }
+
+  .result,
+  .dossier {
+    position: relative;
+    z-index: 1;
   }
 }
