@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#e8f4f2" />
+  <title>Clearwave | Digital asset investing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <main id="authView" class="auth-shell">
+    <section class="auth-story" aria-label="Clearwave introduction">
+      <a class="brand brand-light" href="/" aria-label="Clearwave home"><span class="brand-mark">c</span> clearwave</a>
+      <div class="story-copy">
+        <p class="eyebrow">A clearer way to explore digital assets</p>
+        <h1>Build your investing rhythm <em>without the noise.</em></h1>
+        <p class="story-description">Explore crypto markets, practice portfolio decisions, and understand the mechanics before putting real capital at risk.</p>
+        <div class="story-note"><span class="pulse-dot"></span><span>Paper investing mode · no real funds or orders</span></div>
+      </div>
+      <div class="story-visual" aria-hidden="true">
+        <div class="visual-heading"><span>Market snapshot</span><span class="snapshot-clock">24H</span></div>
+        <div class="snapshot-line"><span>BTC</span><strong>Bitcoin</strong><span class="mini-chart btc-chart">↗</span><b>Explore</b></div>
+        <div class="snapshot-line"><span>ETH</span><strong>Ethereum</strong><span class="mini-chart eth-chart">↗</span><b>Learn</b></div>
+        <div class="snapshot-line"><span>SOL</span><strong>Solana</strong><span class="mini-chart sol-chart">↘</span><b>Practice</b></div>
+        <div class="visual-footer">Quotes may be delayed. Market data is informational only.</div>
+      </div>
+      <div class="story-footer"><span>Market risk is real.</span><span>Start with a simulator.</span></div>
+    </section>
+
+    <section class="auth-panel">
+      <div class="auth-panel-top"><a class="brand" href="/" aria-label="Clearwave home"><span class="brand-mark">c</span> clearwave</a><span class="demo-tag">DEMO SERVICE</span></div>
+      <div class="auth-card">
+        <p class="eyebrow" id="authEyebrow">Welcome back</p>
+        <h2 id="authTitle">Sign in to your account</h2>
+        <p class="auth-intro" id="authIntro">Access your simulated portfolio and market tools.</p>
+        <div class="auth-switch" role="tablist" aria-label="Account access">
+          <button type="button" class="auth-tab active" id="loginTab" role="tab" aria-selected="true">Sign in</button>
+          <button type="button" class="auth-tab" id="registerTab" role="tab" aria-selected="false">Create account</button>
+        </div>
+        <form id="authForm" novalidate>
+          <label class="field" id="nameField" hidden>Full name<input name="name" autocomplete="name" maxlength="80" /></label>
+          <label class="field">Email address<input name="email" type="email" autocomplete="email" maxlength="254" required /></label>
+          <label class="field">Password<input name="password" type="password" autocomplete="current-password" minlength="10" required /><small id="passwordHint">Use your account password.</small></label>
+          <button class="button button-primary auth-submit" type="submit" id="authSubmit">Sign in <span aria-hidden="true">→</span></button>
+          <p class="form-message" id="authMessage" aria-live="polite"></p>
+        </form>
+        <p class="auth-disclaimer">This is a demo investing service. Registration does not open a brokerage account or enable real deposits and withdrawals.</p>
+      </div>
+      <footer class="auth-legal">Clearwave Paper Investing <span>·</span> Not financial advice</footer>
+    </section>
+  </main>
+
+  <div id="appView" class="app-shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#overview" aria-label="Clearwave home"><span class="brand-mark">c</span> clearwave</a>
+      <div class="workspace-label">INVESTOR WORKSPACE</div>
+      <nav class="side-nav" aria-label="Main navigation">
+        <button class="side-link active" data-view="overview"><span class="nav-symbol">◫</span>Overview</button>
+        <button class="side-link" data-view="markets"><span class="nav-symbol">⌁</span>Markets</button>
+        <button class="side-link" data-view="funding"><span class="nav-symbol">⇄</span>Funding requests</button>
+        <button class="side-link" data-view="activity"><span class="nav-symbol">◷</span>Activity</button>
+        <button class="side-link" data-view="admin" id="adminNav" hidden><span class="nav-symbol">▤</span>Admin review</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="risk-card"><span class="risk-icon">i</span><div><strong>Practice, not investing advice</strong><p>All balances and transactions here are simulated.</p></div></div>
+        <div class="profile-row"><span class="avatar" id="userAvatar">C</span><span class="profile-name"><strong id="userName">Client</strong><small id="userRole">Client account</small></span><button class="icon-button" id="signOut" type="button" title="Sign out" aria-label="Sign out">↗</button></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="mobile-nav-button" id="mobileNavButton" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+        <div class="breadcrumb"><span>Clearwave</span><span class="crumb-separator">/</span><strong id="currentSection">Overview</strong></div>
+        <div class="topbar-actions"><span class="service-status"><span class="status-dot"></span>Paper account</span><button class="topbar-user" id="topbarUser" type="button"><span class="avatar small" id="topbarAvatar">C</span><span id="topbarName">Client</span></button></div>
+      </header>
+
+      <div class="content-wrap">
+        <section class="view" id="overviewView">
+          <div class="page-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h1>Good to see you, <em id="greetingName">investor.</em></h1><p class="page-subtitle">A live view of your practice portfolio and selected markets.</p></div><div class="market-stamp"><span class="status-dot"></span><span id="marketUpdated">Loading market data</span></div></div>
+          <div class="demo-banner"><span class="banner-mark">i</span><p><strong>Paper investing environment.</strong> Balances, trades, deposits, and withdrawals are simulated. No real money moves through this service.</p><button class="text-button" data-view="funding">Funding requests <span aria-hidden="true">→</span></button></div>
+          <div class="overview-grid">
+            <article class="balance-panel">
+              <div class="panel-kicker">TOTAL PAPER PORTFOLIO <span class="demo-pill">DEMO USD</span></div>
+              <div class="balance-value" id="totalBalance">$0.00</div>
+              <p class="balance-caption">Market value of holdings plus available demo cash</p>
+              <div class="balance-rule"></div>
+              <div class="balance-breakdown"><div><span>Invested value</span><strong id="investedBalance">$0.00</strong></div><div><span>Available cash</span><strong id="cashBalance">$0.00</strong></div></div>
+              <div class="balance-decoration" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </article>
+            <article class="quick-trade panel">
+              <div class="panel-heading"><div><p class="eyebrow">PAPER TRADE</p><h2>Practice an order</h2></div><span class="trade-mark">↗</span></div>
+              <form id="tradeForm" class="trade-form">
+                <div class="segmented" role="group" aria-label="Order side"><button type="button" class="segment active" data-side="buy">Buy</button><button type="button" class="segment" data-side="sell">Sell</button></div>
+                <label class="field compact-field">Asset<select name="symbol" id="tradeAsset"></select></label>
+                <label class="field compact-field">Amount in USD<div class="input-affix"><span>$</span><input name="amountUsd" type="number" min="5" step="0.01" value="250" required /></div></label>
+                <button class="button button-dark trade-submit" type="submit" id="tradeSubmit">Buy asset <span aria-hidden="true">→</span></button>
+                <p class="trade-caption">A 0.10% simulated fee is applied to paper orders.</p>
+              </form>
+            </article>
+          </div>
+          <section class="content-section holdings-section">
+            <div class="section-heading"><div><p class="eyebrow">YOUR POSITIONS</p><h2>Portfolio holdings</h2></div><button class="text-button" data-view="markets">Explore markets <span aria-hidden="true">→</span></button></div>
+            <div class="table-wrap"><table><thead><tr><th>Asset</th><th>Price</th><th>24h</th><th>Quantity</th><th>Value</th></tr></thead><tbody id="holdingsTable"><tr><td colspan="5" class="table-empty">Loading your portfolio…</td></tr></tbody></table></div>
+          </section>
+          <section class="content-section market-section">
+            <div class="section-heading"><div><p class="eyebrow">MARKET WATCH</p><h2>Selected assets</h2></div><button class="text-button" data-view="markets">View all markets <span aria-hidden="true">→</span></button></div>
+            <div class="market-grid" id="marketCards"></div>
+          </section>
+        </section>
+
+        <section class="view" id="marketsView" hidden>
+          <div class="page-heading"><div><p class="eyebrow">MARKET WATCH</p><h1>Follow the <em>market.</em></h1><p class="page-subtitle">Informational quotes for selected digital assets.</p></div><div class="market-stamp"><span class="status-dot"></span><span id="marketUpdatedAlt">Loading market data</span></div></div>
+          <div class="demo-banner"><span class="banner-mark">i</span><p>Prices may be delayed or fall back to sample data if the provider is unavailable. Nothing here is an offer or recommendation to buy or sell.</p></div>
+          <div class="table-wrap markets-table-wrap"><table><thead><tr><th>Asset</th><th>Price (USD)</th><th>24h change</th><th>24h volume</th><th>Paper position</th><th></th></tr></thead><tbody id="marketsTable"><tr><td colspan="6" class="table-empty">Loading markets…</td></tr></tbody></table></div>
+        </section>
+
+        <section class="view" id="fundingView" hidden>
+          <div class="page-heading"><div><p class="eyebrow">ACCOUNT SERVICES</p><h1>Funding <em>requests.</em></h1><p class="page-subtitle">Create a simulated request for an administrator to review.</p></div></div>
+          <div class="demo-banner"><span class="banner-mark">i</span><p><strong>No payment is collected.</strong> Do not enter bank details, card numbers, wallet addresses, or payment credentials. Approved requests change demo balances only.</p></div>
+          <div class="funding-layout">
+            <article class="panel funding-form-panel"><div class="panel-heading"><div><p class="eyebrow">SIMULATED CASH</p><h2>New request</h2></div></div>
+              <form id="fundingForm" class="funding-form">
+                <div class="segmented funding-segmented" role="group" aria-label="Request type"><button type="button" class="segment active" data-funding-action="deposit">Demo deposit</button><button type="button" class="segment" data-funding-action="withdrawal">Demo withdrawal</button></div>
+                <label class="field">Amount (USD)<div class="input-affix"><span>$</span><input name="amountUsd" type="number" min="10" max="100000" step="0.01" placeholder="500.00" required /></div></label>
+                <label class="field">Reference note <span class="optional">Optional</span><input name="reference" maxlength="100" placeholder="Add a note for the admin" /></label>
+                <button class="button button-primary" type="submit">Submit simulated request <span aria-hidden="true">→</span></button>
+                <p class="trade-caption">Requests are pending until an administrator approves or rejects them.</p>
+              </form>
+            </article>
+            <article class="panel request-info"><p class="eyebrow">HOW IT WORKS</p><h2>Clear review, every time.</h2><ol class="steps-list"><li><span>01</span><div><strong>Submit a request</strong><p>Choose demo deposit or withdrawal and an amount.</p></div></li><li><span>02</span><div><strong>Admin review</strong><p>An administrator reviews the request in the service console.</p></div></li><li><span>03</span><div><strong>Demo balance updates</strong><p>Approval updates your simulated USD balance and account history.</p></div></li></ol></article>
+          </div>
+          <section class="content-section"><div class="section-heading"><div><p class="eyebrow">REQUEST HISTORY</p><h2>Your requests</h2></div></div><div class="table-wrap"><table><thead><tr><th>Type</th><th>Amount</th><th>Reference</th><th>Status</th><th>Submitted</th></tr></thead><tbody id="fundingTable"><tr><td colspan="5" class="table-empty">Loading requests…</td></tr></tbody></table></div></section>
+        </section>
+
+        <section class="view" id="activityView" hidden>
+          <div class="page-heading"><div><p class="eyebrow">ACCOUNT HISTORY</p><h1>Recent <em>activity.</em></h1><p class="page-subtitle">Paper orders and approved demo balance changes.</p></div></div>
+          <div class="demo-banner"><span class="banner-mark">i</span><p>Activity reflects simulated practice only. It is not a statement of real investments or funds.</p></div>
+          <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Asset</th><th>Quantity</th><th>Amount</th><th>Fee</th><th>Date</th></tr></thead><tbody id="activityTable"><tr><td colspan="6" class="table-empty">Loading activity…</td></tr></tbody></table></div>
+        </section>
+
+        <section class="view" id="adminView" hidden>
+          <div class="page-heading"><div><p class="eyebrow">SERVICE MANAGEMENT</p><h1>Admin <em>review.</em></h1><p class="page-subtitle">Review demo funding requests and manage client access.</p></div><span class="admin-badge">ADMINISTRATOR</span></div>
+          <div class="admin-metrics"><article class="metric panel"><span>Registered clients</span><strong id="adminClientCount">0</strong></article><article class="metric panel"><span>Pending requests</span><strong id="adminPendingCount">0</strong></article></div>
+          <section class="content-section"><div class="section-heading"><div><p class="eyebrow">INBOX</p><h2>Funding requests</h2></div></div><div class="table-wrap"><table><thead><tr><th>Client</th><th>Type</th><th>Amount</th><th>Reference</th><th>Submitted</th><th>Status</th><th>Review</th></tr></thead><tbody id="adminFundingTable"><tr><td colspan="7" class="table-empty">Loading requests…</td></tr></tbody></table></div></section>
+          <section class="content-section"><div class="section-heading"><div><p class="eyebrow">CLIENT ACCOUNTS</p><h2>Access management</h2></div></div><div class="table-wrap"><table><thead><tr><th>Client</th><th>Email</th><th>Joined</th><th>Demo cash</th><th>Activity</th><th>Access</th></tr></thead><tbody id="adminUsersTable"><tr><td colspan="6" class="table-empty">Loading clients…</td></tr></tbody></table></div></section>
+        </section>
+        <footer class="app-footer"><span>Clearwave Paper Investing</span><span>Simulated activity only · Not financial advice</span></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
