@@ -92,12 +92,19 @@ async function verify(rawCode) {
     clearInterval(ticker);
     setStatus(`Record verified · ${payload.booking.bookingReference}`);
     state.booking = payload.booking;
+    const dossierPath = `/verify/${encodeURIComponent(payload.booking.bookingReference)}`;
+    if (location.pathname !== dossierPath) {
+      history.pushState({ code: payload.booking.bookingReference }, '', dossierPath);
+    }
+    document.body.classList.add('verify-page');
+    document.title = `Dossier ${payload.booking.bookingReference} · VerifyMyFlight`;
     renderDossier(payload.booking, payload);
-    history.replaceState(null, '', `#/verify/${encodeURIComponent(payload.booking.bookingReference)}`);
-    els.result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (error) {
     clearInterval(ticker);
-    setStatus(error.message || 'The desk could not reach the ledger. Try again.', 'error');
+    const message = error.message || 'The desk could not reach the ledger. Try again.';
+    setStatus(message, 'error');
+    if (document.body.classList.contains('verify-page')) renderVerifyError(message, code);
   } finally {
     setBusy(false);
   }
@@ -141,7 +148,38 @@ function renderDossier(booking, payload) {
   const passengers = booking.passengers || [];
   const lead = passengers[0] || {};
   const hasPosition = Number.isFinite(telemetry.lat) && Number.isFinite(telemetry.lon);
-  const statusClass = /IN FLIGHT/i.test(String(booking.status)) ? 'status-pill--live' : '';
+  const phase = booking.phase || 'scheduled';
+  const timeline = booking.timeline || {};
+  const statusText = booking.statusLabel || booking.status || 'SCHEDULED';
+  const statusClass = phase === 'arrived'
+    ? 'status-pill--arrived'
+    : phase === 'dispatched' ? 'status-pill--live' : 'status-pill--scheduled';
+  const stamp = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
+    })} UTC`;
+  };
+  const phaseIndex = phase === 'arrived' ? 2 : phase === 'dispatched' ? 1 : 0;
+  const phaseSteps = [
+    ['Scheduled', `Ticket issued · ${booking.bookedOn || '—'}`],
+    ['Dispatched', timeline.dispatchedAt ? `Departed ${stamp(timeline.dispatchedAt)}` : (phase === 'dispatched' ? 'In progress · time not recorded' : 'Awaiting departure')],
+    ['Destination reached', timeline.arrivesAt ? `${phase === 'arrived' ? 'Arrived' : 'Due'} ${stamp(timeline.arrivesAt)}` : (phase === 'arrived' ? 'Reached · time not recorded' : 'On arrival')]
+  ];
+  const phaseMarkup = `<ol class="phase-track">${phaseSteps.map(([label, detail], index) => `
+    <li class="phase ${index <= phaseIndex ? 'is-reached' : ''} ${index === phaseIndex ? 'is-current' : ''}">
+      <span class="phase-node" aria-hidden="true"></span>
+      <b>${label}</b>
+      <small>${esc(detail)}</small>
+    </li>`).join('')}</ol>`;
+  const outcome = booking.travelOutcome || 'pending';
+  const outcomeCopy = {
+    pending: ['Awaiting confirmation', 'The desk has not recorded a travel outcome for this passenger yet.'],
+    boarded: ['Boarded · travelled', 'The airline record shows this passenger checked in and boarded this flight.'],
+    missed: ['Flight missed', 'The record shows this passenger did not travel on this flight. Contact the support desk if that is incorrect.']
+  }[outcome] || ['Awaiting confirmation', 'The desk has not recorded a travel outcome yet.'];
   const verifiedAt = new Date(payload.verifiedAt || Date.now());
   const verifiedLabel = verifiedAt.toLocaleString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
@@ -232,6 +270,12 @@ function renderDossier(booking, payload) {
       </div>
     </div>`;
 
+  const toolbar = `
+    <div class="dossier-toolbar">
+      <button type="button" class="back-link" data-action="home"><span aria-hidden="true">←</span> Verification desk</button>
+      <span class="mono">Public dossier · live</span>
+    </div>`;
+
   const html = `
     <article class="dossier">
       <header class="dossier-masthead">
@@ -241,7 +285,8 @@ function renderDossier(booking, payload) {
           <p class="dossier-sub">${esc(booking.airline)} ${esc(booking.flightNumber)} · ${esc(departure.iata)} → ${esc(arrival.iata)} · ${passengers.length} passenger${passengers.length === 1 ? '' : 's'}</p>
         </div>
         <div>
-          <span class="status-pill ${statusClass}"><span class="pulse" aria-hidden="true"></span>${esc(booking.status)}</span>
+          <span class="status-pill ${statusClass}"><span class="pulse" aria-hidden="true"></span>${esc(statusText)}</span>
+          ${booking.dispatchedToday && phase === 'dispatched' ? '<p class="today-chip">Dispatched today</p>' : ''}
           <div class="dossier-actions" style="margin-top:12px">
             <button type="button" class="btn btn-ghost btn-small" data-action="print">Print dossier</button>
             <button type="button" class="btn btn-ghost btn-small" data-action="radar">Open radar</button>
@@ -286,6 +331,7 @@ function renderDossier(booking, payload) {
               </div>
             </div>
           </div>
+          ${phaseMarkup}
         </div>
       </section>
 
@@ -331,6 +377,13 @@ function renderDossier(booking, payload) {
           <h2>Passenger manifest</h2>
           <p class="block-intro">${passengers.length} passenger${passengers.length === 1 ? '' : 's'} reconciled against the ticket record.</p>
           <div class="manifest">${passengerMarkup}</div>
+          <div class="outcome-card outcome-card--${esc(outcome)}">
+            <div>
+              <p class="mono">Travel status</p>
+              <p class="outcome-label">${esc(outcomeCopy[0])}</p>
+            </div>
+            <p class="outcome-note">${esc(outcomeCopy[1])}</p>
+          </div>
         </div>
       </section>
 
@@ -360,7 +413,7 @@ function renderDossier(booking, payload) {
 
   stopAllRadars();
   radarClocks.clear();
-  els.result.innerHTML = html;
+  els.result.innerHTML = toolbar + html;
   mountRadar({
     canvas: $('#live-map-canvas'),
     readout: $('#live-map-readout'),
@@ -774,11 +827,60 @@ document.addEventListener('click', (event) => {
     if (action.dataset.action === 'print') window.print();
     if (action.dataset.action === 'radar') openModal('radar');
     if (action.dataset.action === 'support') openModal('support');
+    if (action.dataset.action === 'home') {
+      history.pushState({}, '', '/');
+      showHome();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 });
 
-const initial = decodeURIComponent((location.hash.match(/^#\/verify\/(.+)$/) || [])[1] || '');
-if (initial) {
-  els.input.value = initial;
-  verify(initial);
+function codeFromLocation() {
+  const pathMatch = location.pathname.match(/^\/verify\/([^/]+)\/?$/);
+  if (pathMatch) return decodeURIComponent(pathMatch[1]);
+  const hashMatch = location.hash.match(/^#\/verify\/(.+)$/);
+  return hashMatch ? decodeURIComponent(hashMatch[1]) : '';
+}
+
+function showHome() {
+  document.body.classList.remove('verify-page');
+  stopAllRadars();
+  radarClocks.clear();
+  state.booking = null;
+  els.result.innerHTML = '';
+  setStatus('');
+  document.title = 'VerifyMyFlight — Booking verification desk';
+}
+
+function renderVerifyError(message, code) {
+  const toolbar = `
+    <div class="dossier-toolbar">
+      <button type="button" class="back-link" data-action="home"><span aria-hidden="true">←</span> Verification desk</button>
+      <span class="mono">Public dossier</span>
+    </div>`;
+  els.result.innerHTML = `${toolbar}
+    <div class="verify-error">
+      <p class="eyebrow"><span>!</span> Verification result</p>
+      <h2>No record for ${esc(code)}</h2>
+      <p>${esc(message)}</p>
+      <button type="button" class="btn btn-primary" data-action="home">Return to the verification desk</button>
+    </div>`;
+}
+
+window.addEventListener('popstate', () => {
+  const code = codeFromLocation();
+  if (code) {
+    document.body.classList.add('verify-page');
+    els.input.value = code;
+    verify(code);
+  } else {
+    showHome();
+  }
+});
+
+const initialCode = codeFromLocation();
+if (initialCode) {
+  document.body.classList.add('verify-page');
+  els.input.value = initialCode;
+  verify(initialCode);
 }

@@ -73,8 +73,8 @@
         </div>
         <dl class="console-stats">
           <div><dt>Total records</dt><dd id="stat-total">—</dd></div>
-          <div><dt>En route</dt><dd id="stat-enroute">—</dd></div>
-          <div><dt>Issued today</dt><dd id="stat-today">—</dd></div>
+          <div><dt>Dispatched</dt><dd id="stat-enroute">—</dd></div>
+          <div><dt>Destination reached</dt><dd id="stat-arrived">—</dd></div>
         </dl>
       </div>
 
@@ -99,14 +99,6 @@
             <label>Airline IATA<input name="airlineIata" value="BA" maxlength="3"></label>
             <label>Flight number<input name="flightNumber" required value="BA 075" maxlength="12"></label>
             <label>Callsign<input name="callsign" placeholder="BAW75" maxlength="12"></label>
-            <label>Status
-              <select name="status">
-                <option>TICKETED · CONFIRMED</option>
-                <option selected>IN FLIGHT — EN ROUTE</option>
-                <option>CHECK-IN OPEN</option>
-                <option>SCHEDULED</option>
-              </select>
-            </label>
             <label>Reservation system<input name="gds" value="Amadeus Altea · carrier sync" maxlength="70"></label>
           </div>
         </fieldset>
@@ -139,6 +131,7 @@
             <label>Baggage belt<input name="arrBaggage" value="Carousel 7" maxlength="30"></label>
             <label>Local time<input name="arrTime" required value="13:25 GMT" maxlength="12"></label>
             <label>Time zone<input name="arrTimezone" value="Europe/London" maxlength="50"></label>
+            <label>Arrival date<input name="arrDate" type="date"></label>
             <label class="span-2">Weather note<input name="arrWeather" value="9°C · Overcast" maxlength="70"></label>
           </div>
         </fieldset>
@@ -179,6 +172,13 @@
             <label>Boarding time<input name="boardingTime" value="06:30" maxlength="12"></label>
             <label>Special requests<input name="requests" value="Window seat · Vegetarian meal" maxlength="80"></label>
             <label>Tier<input name="tier" value="SILVER" maxlength="20"></label>
+            <label>Travel outcome
+              <select name="travelOutcome">
+                <option value="pending" selected>Pending confirmation</option>
+                <option value="boarded">Boarded / travelled</option>
+                <option value="missed">Flight missed</option>
+              </select>
+            </label>
           </div>
         </fieldset>
 
@@ -213,10 +213,10 @@
         <div class="table-wrap">
           <table class="records-table">
             <thead>
-              <tr><th>Tracking code</th><th>Flight</th><th>Route</th><th>Passenger</th><th>Status</th><th>Issued</th><th><span class="visually-hidden">Actions</span></th></tr>
+              <tr><th>Tracking code</th><th>Flight</th><th>Route</th><th>Passenger</th><th>Status</th><th>Outcome</th><th>Issued</th><th><span class="visually-hidden">Actions</span></th></tr>
             </thead>
             <tbody id="records-body">
-              <tr><td colspan="7" class="table-empty">Loading records…</td></tr>
+              <tr><td colspan="8" class="table-empty">Loading records…</td></tr>
             </tbody>
           </table>
         </div>

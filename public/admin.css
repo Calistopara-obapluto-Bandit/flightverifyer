@@ -441,6 +441,39 @@
   color: var(--signal);
 }
 
+.outcome-select {
+  padding: 5px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.outcome-select:disabled {
+  opacity: 0.5;
+}
+
+.outcome-select[data-state="saved"] {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.status-cell {
+  white-space: nowrap;
+}
+
+.status-cell--dispatched {
+  color: var(--signal-dark) !important;
+}
+
+.status-cell--arrived {
+  color: var(--teal) !important;
+}
+
 .table-empty {
   padding: 26px 14px;
   text-align: center;

@@ -70,7 +70,7 @@ function setStatus(element, message, isError = false) {
 }
 
 function copyLink(code) {
-  const link = `${location.origin}/#/verify/${encodeURIComponent(code)}`;
+  const link = `${location.origin}/verify/${encodeURIComponent(code)}`;
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(link);
   }
@@ -151,7 +151,7 @@ createForm.addEventListener('submit', async (event) => {
     const result = await api('/api/admin/bookings', { method: 'POST', body: JSON.stringify(payload) });
     setStatus(createStatus, `Record issued · ${result.code}`);
     issueCode.textContent = result.code;
-    issueOpen.href = `/#/verify/${encodeURIComponent(result.code)}`;
+    issueOpen.href = `/verify/${encodeURIComponent(result.code)}`;
     issuePanel.hidden = false;
     issuePanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await loadRecords();
@@ -190,20 +190,21 @@ async function loadRecords() {
       showAuth();
       return;
     }
-    recordsBody.innerHTML = `<tr><td colspan="7" class="table-empty">${esc(error.message)}</td></tr>`;
+    recordsBody.innerHTML = `<tr><td colspan="8" class="table-empty">${esc(error.message)}</td></tr>`;
   }
 }
 
 function renderStats(bookings) {
-  const today = new Date().toISOString().slice(0, 10);
   $('#stat-total').textContent = bookings.length;
-  $('#stat-enroute').textContent = bookings.filter((booking) => booking.status.startsWith('IN FLIGHT')).length;
-  $('#stat-today').textContent = bookings.filter((booking) => String(booking.createdAt || '').slice(0, 10) === today).length;
+  $('#stat-enroute').textContent = bookings.filter((booking) => booking.phase === 'dispatched').length;
+  $('#stat-arrived').textContent = bookings.filter((booking) => booking.phase === 'arrived').length;
 }
+
+const outcomeOptions = { pending: 'Pending', boarded: 'Boarded', missed: 'Missed' };
 
 function renderRecords(bookings) {
   if (!bookings.length) {
-    recordsBody.innerHTML = '<tr><td colspan="7" class="table-empty">No records yet. Issue the first one above.</td></tr>';
+    recordsBody.innerHTML = '<tr><td colspan="8" class="table-empty">No records yet. Issue the first one above.</td></tr>';
     return;
   }
   recordsBody.innerHTML = bookings.map((booking) => {
@@ -215,18 +216,43 @@ function renderRecords(bookings) {
       <td>${esc(booking.flightNumber)}<br><span class="mono">${esc(booking.airline)}</span></td>
       <td class="mono">${esc(booking.route)}</td>
       <td>${esc(booking.passenger)}</td>
-      <td class="mono">${esc(booking.status)}</td>
+      <td class="mono status-cell status-cell--${esc(booking.phase || 'scheduled')}">${esc(booking.status)}</td>
+      <td>
+        <select class="outcome-select" data-outcome-code="${esc(booking.code)}" aria-label="Travel outcome for ${esc(booking.code)}">
+          ${Object.entries(outcomeOptions).map(([value, label]) => `<option value="${value}"${booking.outcome === value ? ' selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </td>
       <td class="mono">${esc(issued)}</td>
       <td>
         <div class="row-actions">
           <button type="button" class="mini-button" data-copy="${esc(booking.code)}">Copy link</button>
-          <a class="mini-button" href="/#/verify/${encodeURIComponent(booking.code)}" target="_blank" rel="noopener">Open</a>
+          <a class="mini-button" href="/verify/${encodeURIComponent(booking.code)}" target="_blank" rel="noopener">Open</a>
           <button type="button" class="mini-button danger" data-delete="${esc(booking.code)}">Delete</button>
         </div>
       </td>
     </tr>`;
   }).join('');
 }
+
+recordsBody.addEventListener('change', async (event) => {
+  const select = event.target.closest('[data-outcome-code]');
+  if (!select) return;
+  const code = select.dataset.outcomeCode;
+  select.disabled = true;
+  select.dataset.state = 'saving';
+  try {
+    await api(`/api/admin/bookings/${encodeURIComponent(code)}/outcome`, {
+      method: 'PATCH',
+      body: JSON.stringify({ outcome: select.value })
+    });
+    select.dataset.state = 'saved';
+    window.setTimeout(() => { delete select.dataset.state; }, 1600);
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    select.disabled = false;
+  }
+});
 
 recordsBody.addEventListener('click', async (event) => {
   const copyButton = event.target.closest('[data-copy]');

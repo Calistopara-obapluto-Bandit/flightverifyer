@@ -54,17 +54,72 @@ async function initDatabase() {
 
   const { rows } = await pool.query('SELECT COUNT(*) AS count FROM bookings');
   if (Number(rows[0].count) === 0) {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const seedTimelines = {
+      'BX-H43TYYE': { dispatchedAt: now - 2 * hour, arrivesAt: now + 4 * hour, outcome: 'boarded' },
+      'F4J5UZ': { dispatchedAt: now - 7 * hour, arrivesAt: now - 2 * hour, outcome: 'boarded' },
+      'M7K9X2': { dispatchedAt: now + 30 * hour, arrivesAt: now + 38 * hour, outcome: 'pending' }
+    };
     for (const [code, booking] of Object.entries(seedBookings)) {
+      const seed = seedTimelines[code] || { dispatchedAt: now, arrivesAt: now + 6 * hour, outcome: 'pending' };
+      const record = {
+        ...booking,
+        travelOutcome: seed.outcome,
+        timeline: {
+          dispatchedAt: new Date(seed.dispatchedAt).toISOString(),
+          arrivesAt: new Date(seed.arrivesAt).toISOString()
+        }
+      };
       await pool.query(
         `INSERT INTO bookings (code, payload, created_at)
          VALUES ($1, $2::jsonb, $3)
          ON CONFLICT (code) DO NOTHING`,
-        [code, JSON.stringify(booking), booking.issuedAt || new Date().toISOString()]
+        [code, JSON.stringify(record), booking.issuedAt || new Date().toISOString()]
       );
     }
     console.log(`[db] seeded ${Object.keys(seedBookings).length} verification records`);
   }
+
+  const backfilled = await backfillTimelines();
+  if (backfilled) console.log(`[db] backfilled flight timelines for ${backfilled} record(s)`);
   return true;
+}
+
+// Records issued before timelines existed were seeded with local clock times only.
+// Derive an absolute departure/arrival from the issue date so their phase can advance.
+function timelineFromBooking(booking) {
+  const issued = new Date(booking.issuedAt || booking.createdAt || Date.now());
+  if (Number.isNaN(issued.getTime())) return null;
+  const date = issued.toISOString().slice(0, 10);
+  const departure = zonedToUtc(date, parseClock(booking.departure?.scheduled), booking.departure?.timezone);
+  if (!departure) return null;
+  let arrival = zonedToUtc(date, parseClock(booking.arrival?.scheduled), booking.arrival?.timezone);
+  if (arrival && arrival.getTime() <= departure.getTime()) {
+    arrival = new Date(arrival.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return {
+    dispatchedAt: departure.toISOString(),
+    arrivesAt: arrival ? arrival.toISOString() : null
+  };
+}
+
+async function backfillTimelines() {
+  const { rows } = await pool.query("SELECT code, payload FROM bookings WHERE payload->>'timeline' IS NULL");
+  let updated = 0;
+  for (const row of rows) {
+    const booking = parsePayload(row.payload);
+    const timeline = timelineFromBooking(booking);
+    if (!timeline) continue;
+    const payload = {
+      ...booking,
+      timeline,
+      travelOutcome: travelOutcomes.includes(booking.travelOutcome) ? booking.travelOutcome : 'pending'
+    };
+    await pool.query('UPDATE bookings SET payload = $2::jsonb WHERE code = $1', [row.code, JSON.stringify(payload)]);
+    updated += 1;
+  }
+  return updated;
 }
 
 async function initWithRetry(attempts = 3) {
@@ -283,12 +338,90 @@ function ticketName(fullName) {
   return given ? `${last} / ${given}` : last;
 }
 
-const allowedStatuses = [
-  'TICKETED · CONFIRMED',
-  'IN FLIGHT — EN ROUTE',
-  'CHECK-IN OPEN',
-  'SCHEDULED'
-];
+const travelOutcomes = ['pending', 'boarded', 'missed'];
+
+function parseClock(value) {
+  const match = String(value || '').match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return { hours, minutes };
+}
+
+// Turn a local wall-clock date/time in an IANA zone into an absolute instant.
+function zonedToUtc(dateValue, clock, timeZone) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateValue || ''));
+  if (!match || !clock) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const naive = Date.UTC(year, month - 1, day, clock.hours, clock.minutes);
+  let zone = timeZone || 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone }).format();
+  } catch {
+    zone = 'UTC';
+  }
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).formatToParts(new Date(naive));
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const asUtc = Date.UTC(+values.year, +values.month - 1, +values.day, +values.hour, +values.minute, +values.second);
+    return new Date(naive - (asUtc - naive));
+  } catch {
+    return new Date(naive);
+  }
+}
+
+function isSameUtcDay(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  return date.toISOString().slice(0, 10) === now.toISOString().slice(0, 10);
+}
+
+function phaseFor(booking) {
+  const timeline = booking.timeline || {};
+  const dispatched = Date.parse(timeline.dispatchedAt);
+  const arrives = Date.parse(timeline.arrivesAt);
+  if (Number.isFinite(dispatched) && Number.isFinite(arrives)) {
+    const now = Date.now();
+    if (now >= arrives) return 'arrived';
+    if (now >= dispatched) return 'dispatched';
+    return 'scheduled';
+  }
+  const legacy = String(booking.status || '').toUpperCase();
+  if (legacy.includes('ARRIV')) return 'arrived';
+  if (legacy.includes('IN FLIGHT') || legacy.includes('EN ROUTE') || legacy.includes('DISPATCH')) return 'dispatched';
+  return 'scheduled';
+}
+
+const phaseLabels = {
+  scheduled: 'SCHEDULED',
+  dispatched: 'DISPATCHED · EN ROUTE',
+  arrived: 'DESTINATION REACHED'
+};
+
+function decorateBooking(booking) {
+  const phase = phaseFor(booking);
+  return {
+    ...booking,
+    phase,
+    statusLabel: phaseLabels[phase],
+    status: phaseLabels[phase],
+    dispatchedToday: Boolean(booking.timeline?.dispatchedAt) && isSameUtcDay(booking.timeline.dispatchedAt),
+    travelOutcome: travelOutcomes.includes(booking.travelOutcome) ? booking.travelOutcome : 'pending'
+  };
+}
 
 async function buildBooking(input) {
   const code = await uniqueCode();
@@ -318,8 +451,15 @@ async function buildBooking(input) {
   const position = depPoint && arrPoint
     ? greatCirclePosition(depPoint, arrPoint, progress / 100)
     : [null, null];
-  const status = allowedStatuses.includes(text(input.status, 40)) ? text(input.status, 40) : allowedStatuses[0];
   const issuedAt = new Date().toISOString();
+  const departureClock = parseClock(depTime);
+  const arrivalClock = parseClock(arrTime);
+  const departureMoment = zonedToUtc(text(input.depDate, 10), departureClock, text(input.depTimezone, 50));
+  let arrivalMoment = zonedToUtc(text(input.arrDate, 10) || text(input.depDate, 10), arrivalClock, text(input.arrTimezone, 50));
+  if (departureMoment && arrivalMoment && arrivalMoment.getTime() <= departureMoment.getTime()) {
+    arrivalMoment = new Date(arrivalMoment.getTime() + 24 * 60 * 60 * 1000);
+  }
+  const travelOutcome = travelOutcomes.includes(text(input.travelOutcome, 20)) ? text(input.travelOutcome, 20) : 'pending';
   const bookedOn = new Intl.DateTimeFormat('en-US', {
     weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
   }).format(new Date());
@@ -329,7 +469,12 @@ async function buildBooking(input) {
   return {
     bookingReference: code,
     pnr,
-    status,
+    status: 'SCHEDULED',
+    timeline: {
+      dispatchedAt: departureMoment ? departureMoment.toISOString() : null,
+      arrivesAt: arrivalMoment ? arrivalMoment.toISOString() : null
+    },
+    travelOutcome,
     gds: text(input.gds, 70) || 'Amadeus Altea · carrier sync',
     issuedAt,
     bookedOn,
@@ -542,16 +687,21 @@ app.get('/api/admin/session', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/bookings', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
-  const rows = (await allBookings()).map((booking) => ({
-    code: booking.bookingReference,
-    pnr: booking.pnr,
-    airline: booking.airline,
-    flightNumber: booking.flightNumber,
-    route: `${booking.departure?.iata || '—'} → ${booking.arrival?.iata || '—'}`,
-    passenger: booking.passengers?.[0]?.fullName || '—',
-    status: booking.status,
-    createdAt: booking.createdAt || booking.issuedAt
-  }));
+  const rows = (await allBookings()).map((raw) => {
+    const booking = decorateBooking(raw);
+    return {
+      code: booking.bookingReference,
+      pnr: booking.pnr,
+      airline: booking.airline,
+      flightNumber: booking.flightNumber,
+      route: `${booking.departure?.iata || '—'} → ${booking.arrival?.iata || '—'}`,
+      passenger: booking.passengers?.[0]?.fullName || '—',
+      status: booking.statusLabel,
+      phase: booking.phase,
+      outcome: booking.travelOutcome,
+      createdAt: booking.createdAt || booking.issuedAt
+    };
+  });
   res.json({ bookings: rows });
 }));
 
@@ -595,12 +745,33 @@ app.post('/api/admin/bookings', requireAdmin, requireDatabase, asyncRoute(async 
     `INSERT INTO bookings (code, payload, created_at) VALUES ($1, $2::jsonb, $3)`,
     [booking.bookingReference, JSON.stringify(booking), booking.issuedAt]
   );
-  res.status(201).json({ code: booking.bookingReference, booking });
+  res.status(201).json({ code: booking.bookingReference, booking: decorateBooking(booking) });
+}));
+
+app.patch('/api/admin/bookings/:code/outcome', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const outcome = String(req.body?.outcome || '').toLowerCase();
+  if (!travelOutcomes.includes(outcome)) {
+    return res.status(400).json({ error: 'Choose pending, boarded or missed.' });
+  }
+  const booking = await findBooking(code);
+  if (!booking) return res.status(404).json({ error: 'Record not found.' });
+  const updated = { ...booking, travelOutcome: outcome, outcomeUpdatedAt: new Date().toISOString() };
+  await pool.query(
+    `UPDATE bookings SET payload = $2::jsonb
+     WHERE code = $1 OR payload->>'bookingReference' = $1 OR payload->>'pnr' = $1`,
+    [code, JSON.stringify(updated)]
+  );
+  res.json({ code: booking.bookingReference, travelOutcome: outcome });
 }));
 
 app.delete('/api/admin/bookings/:code', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
   const code = String(req.params.code || '').toUpperCase();
-  const result = await pool.query('DELETE FROM bookings WHERE code = $1', [code]);
+  const result = await pool.query(
+    `DELETE FROM bookings
+     WHERE code = $1 OR payload->>'bookingReference' = $1 OR payload->>'pnr' = $1`,
+    [code]
+  );
   if (!result.rowCount) return res.status(404).json({ error: 'Record not found.' });
   res.json({ deleted: code });
 }));
@@ -610,6 +781,11 @@ app.delete('/api/admin/bookings/:code', requireAdmin, requireDatabase, asyncRout
 /* ------------------------------------------------------------------ */
 
 app.use(express.static(publicDirectory, { extensions: ['html'] }));
+
+// Dedicated verification page; the client app renders the dossier for this path.
+app.get('/verify/:code', (req, res) => {
+  res.sendFile(path.join(publicDirectory, 'index.html'));
+});
 
 const normaliseCode = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
 
@@ -640,7 +816,7 @@ app.get('/api/verify/:code', requireDatabase, asyncRoute(async (req, res) => {
   }
   res.setHeader('Cache-Control', 'no-store');
   res.json({
-    booking,
+    booking: decorateBooking(booking),
     verifiedAt: new Date().toISOString(),
     source: 'VerifyMyFlight verification ledger'
   });

@@ -1947,3 +1947,254 @@ h1 em {
     display: none !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Verification page, phases and travel outcome                        */
+/* ------------------------------------------------------------------ */
+
+body.verify-page .hero {
+  display: none;
+}
+
+body.verify-page .result {
+  padding-top: 22px;
+}
+
+.result {
+  scroll-margin-top: 96px;
+}
+
+.dossier-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+  padding-block: 18px 4px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.back-link:hover {
+  color: var(--signal);
+}
+
+.dossier-toolbar .mono {
+  font-size: 9px;
+  color: var(--ink-faint);
+}
+
+.today-chip {
+  display: block;
+  width: fit-content;
+  margin-top: 10px;
+  padding: 4px 9px;
+  border: 1px dashed var(--signal);
+  color: var(--signal-dark);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.status-pill--scheduled {
+  border-color: var(--line-strong);
+  background: var(--bone-deep);
+  color: var(--ink-soft);
+}
+
+.status-pill--arrived {
+  border-color: var(--teal);
+  background: #e2f0eb;
+  color: var(--teal);
+}
+
+.phase-track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 26px 0 0;
+  padding: 20px 0 0;
+  list-style: none;
+  border-top: 1px dotted var(--line);
+}
+
+.phase {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding-top: 18px;
+}
+
+.phase::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--line);
+}
+
+.phase.is-reached::before {
+  background: var(--teal);
+}
+
+.phase.is-current::before {
+  background: var(--signal);
+}
+
+.phase-node {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.phase.is-reached .phase-node {
+  border-color: var(--teal);
+  background: var(--teal);
+}
+
+.phase.is-current .phase-node {
+  border-color: var(--signal);
+  background: var(--signal);
+}
+
+.phase b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.phase.is-current b {
+  color: var(--signal-dark);
+}
+
+.phase small {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.outcome-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 26px;
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-strong);
+  border-left-width: 4px;
+  background: var(--paper);
+}
+
+.outcome-card .mono {
+  font-size: 9px;
+  color: var(--ink-faint);
+}
+
+.outcome-label {
+  margin-top: 2px;
+  font-family: var(--serif);
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.outcome-note {
+  max-width: 52ch;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.outcome-card--pending {
+  border-left-color: var(--amber);
+}
+
+.outcome-card--boarded {
+  border-left-color: var(--teal);
+}
+
+.outcome-card--missed {
+  border-left-color: var(--signal);
+}
+
+.outcome-card--missed .outcome-label {
+  color: var(--signal-dark);
+}
+
+.verify-error {
+  max-width: 560px;
+  padding: 70px 0 100px;
+}
+
+.verify-error h2 {
+  margin-top: 16px;
+  font-family: var(--serif);
+  font-size: clamp(34px, 5vw, 48px);
+  font-weight: 400;
+  line-height: 1.02;
+}
+
+.verify-error p:not(.eyebrow) {
+  margin-top: 12px;
+  color: var(--ink-soft);
+}
+
+.verify-error .btn {
+  margin-top: 22px;
+}
+
+@media (max-width: 640px) {
+  .phase-track {
+    grid-template-columns: 1fr;
+    gap: 0;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .phase {
+    padding: 0 0 16px 22px;
+  }
+
+  .phase::before {
+    top: 4px;
+    bottom: 0;
+    left: 4px;
+    right: auto;
+    width: 2px;
+    height: auto;
+  }
+
+  .phase:last-child::before {
+    display: none;
+  }
+
+  .phase-node {
+    top: 2px;
+  }
+}
+
+@media print {
+  .dossier-toolbar,
+  .today-chip {
+    display: none !important;
+  }
+}
