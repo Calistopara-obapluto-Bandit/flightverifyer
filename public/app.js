@@ -272,7 +272,12 @@ function renderDossier(booking, payload) {
 
   const watermark = `
     <div class="print-watermark" aria-hidden="true">
-      ${Array.from({ length: 24 }, () => '<span>flightverifyer</span>').join('')}
+      ${`
+      <span class="print-watermark__mark">
+        <span class="print-watermark__rule" aria-hidden="true"></span>
+        <span class="print-watermark__word">flightverifyer</span>
+        <span class="print-watermark__tag">Verification ledger</span>
+      </span>`.repeat(15)}
     </div>`;
 
   const toolbar = `

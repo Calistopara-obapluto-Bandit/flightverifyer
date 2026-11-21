@@ -643,6 +643,92 @@ function readJsonFile(file, fallback) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Support email delivery (Resend HTTP API)                            */
+/* ------------------------------------------------------------------ */
+
+const supportRecipient = String(process.env.SUPPORT_EMAIL || 'support@sbiamautos.com').trim();
+const supportSender = String(process.env.SUPPORT_FROM || 'flightverifyer desk <onboarding@resend.dev>').trim();
+const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
+
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}[char]));
+
+async function emailSupportRequest(request) {
+  if (!resendApiKey) {
+    console.warn('[support] RESEND_API_KEY is not set; the request was saved but not emailed.');
+    return false;
+  }
+
+  const fields = [
+    ['Reference', request.reference],
+    ['Name', request.name],
+    ['Email', request.email],
+    ['Category', request.category],
+    ['Priority', request.priority],
+    ['Received', request.createdAt]
+  ];
+
+  const text = [
+    `New support request ${request.reference}`,
+    '',
+    ...fields.map(([label, value]) => `${label}: ${value}`),
+    '',
+    'Message:',
+    request.message
+  ].join('\n');
+
+  const rows = fields
+    .map(([label, value]) => `<tr><td style="padding:5px 16px 5px 0;font:600 10px/1.5 Helvetica,Arial,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#7b7466;white-space:nowrap">${escapeHtml(label)}</td><td style="padding:5px 0;font:14px/1.5 Helvetica,Arial,sans-serif;color:#16211f">${escapeHtml(value)}</td></tr>`)
+    .join('');
+
+  const html = `<!doctype html><html><body style="margin:0;padding:28px;background:#f7f2e8">
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;margin:0 auto;background:#fffdf8;border:1px solid #e3dbca;border-top:3px solid #d9481f">
+    <tr><td style="padding:22px 24px;border-bottom:1px solid #efe7d7">
+      <p style="margin:0;font:11px/1.4 Helvetica,Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:#7b7466">flightverifyer · support desk</p>
+      <h1 style="margin:8px 0 0;font:400 25px/1.2 Georgia,'Times New Roman',serif;color:#16211f">New support request</h1>
+      <p style="margin:6px 0 0;font:13px/1.5 Helvetica,Arial,sans-serif;color:#5b665f">Ticket <b>${escapeHtml(request.reference)}</b> · ${escapeHtml(request.category)}</p>
+    </td></tr>
+    <tr><td style="padding:20px 24px">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%">${rows}</table>
+      <p style="margin:20px 0 6px;font:600 10px/1.5 Helvetica,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#7b7466">Message</p>
+      <div style="padding:16px;background:#faf6ec;border-left:2px solid #d9481f;font:14px/1.65 Helvetica,Arial,sans-serif;color:#16211f;white-space:pre-wrap">${escapeHtml(request.message)}</div>
+      <p style="margin:20px 0 0;font:12px/1.6 Helvetica,Arial,sans-serif;color:#5b665f">Reply directly to this email to answer <b>${escapeHtml(request.name)}</b> at ${escapeHtml(request.email)}.</p>
+    </td></tr>
+    <tr><td style="padding:14px 24px;border-top:1px solid #efe7d7;font:10px/1.6 Helvetica,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9a9285">flightverifyer · verification ledger</td></tr>
+  </table>
+</body></html>`;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: supportSender,
+      to: [supportRecipient],
+      reply_to: request.email,
+      subject: `[${request.reference}] ${request.category} — ${request.priority}`,
+      text,
+      html
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Resend responded ${response.status}: ${detail.slice(0, 300)}`);
+  }
+
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
 /* Admin routes (before static so it stays unlinked and noindexed)      */
 /* ------------------------------------------------------------------ */
 
@@ -865,7 +951,14 @@ app.post('/api/support', async (req, res, next) => {
     await fs.writeFile(temporaryFile, JSON.stringify(existing.slice(0, 500), null, 2));
     await fs.rename(temporaryFile, supportFile);
 
-    res.status(201).json({ reference: request.reference, receivedAt: request.createdAt });
+    let emailed = false;
+    try {
+      emailed = await emailSupportRequest(request);
+    } catch (error) {
+      console.error(`[support] email delivery failed for ${request.reference}:`, error.message);
+    }
+
+    res.status(201).json({ reference: request.reference, receivedAt: request.createdAt, emailed });
   } catch (error) {
     next(error);
   }
