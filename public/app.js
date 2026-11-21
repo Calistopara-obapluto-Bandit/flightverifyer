@@ -298,14 +298,14 @@ function renderDossier(booking, payload) {
             <div><dt>Calibrated altitude</dt><dd>${number(telemetry.altitudeFt)}<small>ft</small></dd></div>
             <div><dt>Ground speed</dt><dd>${number(telemetry.groundSpeedKts)}<small>kts</small></dd></div>
             <div><dt>Mach</dt><dd>${esc(telemetry.mach)}</dd></div>
-            <div><dt>True track</dt><dd>${number(telemetry.heading)}°</dd></div>
+            <div><dt>Initial track</dt><dd>${number(telemetry.heading)}°</dd></div>
             <div><dt>Vertical rate</dt><dd>${number(telemetry.verticalRate)}<small>fpm</small></dd></div>
             <div><dt>GPS position</dt><dd>${hasPosition ? `${Number(telemetry.lat).toFixed(2)}N / ${Number(telemetry.lon).toFixed(2)}E` : 'Not transmitted'}</dd></div>
           </dl>
           <div class="live-map">
             <div class="live-map-head">
               <span class="live-badge"><span class="pulse" aria-hidden="true"></span>Live corridor</span>
-              <span class="mono">ADS-B position feed</span>
+              <span class="mono">ADS-B feed · 60× playback</span>
             </div>
             <div class="radar-canvas radar-canvas--inline" id="live-map-canvas"></div>
             <div class="radar-readout" id="live-map-readout"></div>
@@ -359,6 +359,7 @@ function renderDossier(booking, payload) {
     </article>`;
 
   stopAllRadars();
+  radarClocks.clear();
   els.result.innerHTML = html;
   mountRadar({
     canvas: $('#live-map-canvas'),
@@ -373,12 +374,87 @@ function renderDossier(booking, payload) {
 /* ------------------------------------------------------------------ */
 
 const radarStops = new Map();
+const radarClocks = new Map();
 let radarCounter = 0;
 
-function projectPoint(lat, lon, bounds) {
-  const x = 40 + ((lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 680;
-  const y = 320 - ((lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * 250;
-  return { x, y };
+const toRadians = (degrees) => (degrees * Math.PI) / 180;
+const toDegrees = (radians) => (radians * 180) / Math.PI;
+
+function greatCirclePoint(from, to, fraction) {
+  const f = Math.min(1, Math.max(0, fraction));
+  const lat1 = toRadians(from.lat);
+  const lon1 = toRadians(from.lon);
+  const lat2 = toRadians(to.lat);
+  const lon2 = toRadians(to.lon);
+  const angle = 2 * Math.asin(Math.sqrt(
+    Math.sin((lat2 - lat1) / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+  ));
+  if (!Number.isFinite(angle) || angle < 1e-9) {
+    return {
+      lat: from.lat + (to.lat - from.lat) * f,
+      lon: from.lon + (to.lon - from.lon) * f
+    };
+  }
+  const a = Math.sin((1 - f) * angle) / Math.sin(angle);
+  const b = Math.sin(f * angle) / Math.sin(angle);
+  const x = a * Math.cos(lat1) * Math.cos(lon1) + b * Math.cos(lat2) * Math.cos(lon2);
+  const y = a * Math.cos(lat1) * Math.sin(lon1) + b * Math.cos(lat2) * Math.sin(lon2);
+  const z = a * Math.sin(lat1) + b * Math.sin(lat2);
+  return {
+    lat: toDegrees(Math.atan2(z, Math.hypot(x, y))),
+    lon: toDegrees(Math.atan2(y, x))
+  };
+}
+
+function greatCircleKm(from, to) {
+  const lat1 = toRadians(from.lat);
+  const lat2 = toRadians(to.lat);
+  const dLat = lat2 - lat1;
+  const dLon = toRadians(to.lon - from.lon);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function bearingBetween(from, to) {
+  const lat1 = toRadians(from.lat);
+  const lat2 = toRadians(to.lat);
+  const dLon = toRadians(to.lon - from.lon);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Uniform equirectangular fit: one scale for both axes so distances stay honest.
+function radarProjection(samples) {
+  const midLat = (Math.min(...samples.map((point) => point.lat)) + Math.max(...samples.map((point) => point.lat))) / 2;
+  const lonScale = Math.max(0.2, Math.cos(toRadians(midLat)));
+  const raw = samples.map((point) => ({ x: point.lon * lonScale, y: -point.lat }));
+  const minX = Math.min(...raw.map((point) => point.x));
+  const maxX = Math.max(...raw.map((point) => point.x));
+  const minY = Math.min(...raw.map((point) => point.y));
+  const maxY = Math.max(...raw.map((point) => point.y));
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const scale = Math.min((760 - 160) / spanX, (360 - 126) / spanY);
+  const offsetX = (760 - spanX * scale) / 2 - minX * scale;
+  const offsetY = (360 - spanY * scale) / 2 - minY * scale;
+  return (point) => ({
+    x: point.lon * lonScale * scale + offsetX,
+    y: -point.lat * scale + offsetY
+  });
+}
+
+function formatDistance(km) {
+  return `${number(Math.round(km))} km`;
+}
+
+function formatDuration(hours) {
+  if (!Number.isFinite(hours) || hours <= 0) return '—';
+  const totalMinutes = Math.max(1, Math.round(hours * 60));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 }
 
 function clockLabel() {
@@ -418,23 +494,39 @@ function mountRadar({ canvas, readout, booking, compact = false }) {
     return;
   }
 
-  const lats = [departure.lat, arrival.lat, telemetry.lat];
-  const lons = [departure.lon, arrival.lon, telemetry.lon];
-  const bounds = {
-    minLat: Math.min(...lats) - 7,
-    maxLat: Math.max(...lats) + 7,
-    minLon: Math.min(...lons) - 7,
-    maxLon: Math.max(...lons) + 7
-  };
+  const from = { lat: Number(departure.lat), lon: Number(departure.lon) };
+  const to = { lat: Number(arrival.lat), lon: Number(arrival.lon) };
+  const samples = Array.from({ length: 73 }, (_, index) => greatCirclePoint(from, to, index / 72));
+  const project = radarProjection(samples);
+  const projected = samples.map(project);
+  const dep = projected[0];
+  const arr = projected[projected.length - 1];
 
-  const dep = projectPoint(departure.lat, departure.lon, bounds);
-  const arr = projectPoint(arrival.lat, arrival.lon, bounds);
-  const mid = { x: (dep.x + arr.x) / 2, y: (dep.y + arr.y) / 2 };
-  const dx = arr.x - dep.x;
-  const dy = arr.y - dep.y;
-  const span = Math.hypot(dx, dy) || 1;
-  const control = { x: mid.x - (dy / span) * 55, y: mid.y + (dx / span) * 55 };
-  const route = `M${dep.x} ${dep.y} Q${control.x} ${control.y} ${arr.x} ${arr.y}`;
+  const route = projected
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(' ');
+
+  const totalKm = Math.max(1, Number(telemetry.distanceTotalKm) || greatCircleKm(from, to));
+  const speedKmh = Math.max(120, (Number(telemetry.groundSpeedKts) || 450) * 1.852);
+  const pixelLength = projected.reduce((sum, point, index) => (
+    index === 0 ? 0 : sum + Math.hypot(point.x - projected[index - 1].x, point.y - projected[index - 1].y)
+  ), 0);
+  const kmPerPixel = totalKm / Math.max(1, pixelLength);
+  const niceScaleKm = [2500, 2000, 1000, 500, 250, 100, 50]
+    .find((km) => km / kmPerPixel >= 70 && km / kmPerPixel <= 160) || 1000;
+  const scaleBarKm = niceScaleKm;
+  const scaleBarPx = Math.max(60, Math.min(170, scaleBarKm / kmPerPixel));
+  const distanceMarkers = [0.25, 0.5, 0.75].map((fraction) => {
+    const point = project(greatCirclePoint(from, to, fraction));
+    return `<g>
+      <circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="2.4" fill="currentColor" fill-opacity=".45"/>
+      <text x="${(point.x - 8).toFixed(1)}" y="${(point.y - 5).toFixed(1)}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9" fill="currentColor" fill-opacity=".5">${number(Math.round(totalKm * fraction))} km</text>
+    </g>`;
+  }).join('');
+
+  const startFraction = Math.min(0.96, Math.max(0.02, (Number(telemetry.progress) || 2) / 100));
+  const playback = 60;
+  const fractionPerSecond = ((speedKmh / 3600) / totalKm) * playback;
   const uid = `radar${radarCounter += 1}`;
 
   canvas.innerHTML = `<svg viewBox="0 0 760 360" role="img" aria-label="Live route corridor for ${esc(booking.flightNumber)}">
@@ -443,33 +535,36 @@ function mountRadar({ canvas, readout, booking, compact = false }) {
         <path d="M38 0H0v38" fill="none" stroke="currentColor" stroke-opacity=".13" stroke-width="1"/>
       </pattern>
       <radialGradient id="${uid}-glow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#7fd8c4" stop-opacity=".22"/>
+        <stop offset="0%" stop-color="#7fd8c4" stop-opacity=".16"/>
         <stop offset="100%" stop-color="#7fd8c4" stop-opacity="0"/>
       </radialGradient>
     </defs>
     <rect width="760" height="360" fill="url(#${uid}-grid)"/>
-    <circle cx="380" cy="180" r="150" fill="url(#${uid}-glow)"/>
-    <g fill="none" stroke="currentColor" stroke-opacity=".22">
-      <circle cx="380" cy="180" r="60"/><circle cx="380" cy="180" r="110"/><circle cx="380" cy="180" r="160"/>
-      <line x1="40" y1="180" x2="720" y2="180" stroke-opacity=".12"/><line x1="380" y1="20" x2="380" y2="340" stroke-opacity=".12"/>
+    <circle cx="380" cy="180" r="170" fill="url(#${uid}-glow)"/>
+    <g fill="none" stroke="currentColor" stroke-opacity=".14">
+      <circle cx="380" cy="180" r="80"/><circle cx="380" cy="180" r="150"/><circle cx="380" cy="180" r="220"/>
     </g>
-    <g opacity=".45">
-      <line x1="380" y1="180" x2="380" y2="25" stroke="#7fd8c4" stroke-width="1.4"/>
-      <animateTransform attributeName="transform" type="rotate" from="0 380 180" to="360 380 180" dur="7s" repeatCount="indefinite"/>
-    </g>
-    <path d="${route}" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="1.6" stroke-dasharray="6 7"/>
-    <path d="${route}" class="radar-trail" fill="none" stroke="#7fd8c4" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="${route}" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.5" stroke-dasharray="3 6"/>
+    <polyline class="radar-trail" points="" fill="none" stroke="#7fd8c4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="${dep.x}" cy="${dep.y}" r="4.5" fill="#0e5a4e" stroke="#f2ece1" stroke-width="1.3"/>
     <circle cx="${arr.x}" cy="${arr.y}" r="4.5" fill="#d9481f" stroke="#f2ece1" stroke-width="1.3"/>
     <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">
-      <text x="${dep.x + 10}" y="${dep.y + 4}">${esc(departure.iata)} · ${esc(String(departure.city).toUpperCase())}</text>
-      <text x="${arr.x - 10}" y="${arr.y + 4}" text-anchor="end">${esc(arrival.iata)} · ${esc(String(arrival.city).toUpperCase())}</text>
+      <text x="${Math.min(600, dep.x + 10)}" y="${Math.min(330, dep.y + 4)}">${esc(departure.iata)} · ${esc(String(departure.city).toUpperCase())}</text>
+      <text x="${Math.max(160, arr.x - 10)}" y="${Math.min(330, arr.y + 4)}" text-anchor="end">${esc(arrival.iata)} · ${esc(String(arrival.city).toUpperCase())}</text>
     </g>
-    <g class="radar-plane">
+    ${distanceMarkers}
+    <rect x="32" y="310" width="146" height="32" fill="#0f1816" fill-opacity=".72"/>
+    <g stroke="currentColor" stroke-opacity=".8" stroke-width="1.2">
+      <line x1="40" y1="333" x2="${40 + scaleBarPx}" y2="333"/>
+      <line x1="40" y1="327" x2="40" y2="339"/>
+      <line x1="${40 + scaleBarPx}" y1="327" x2="${40 + scaleBarPx}" y2="339"/>
+    </g>
+    <text x="40" y="321" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" fill-opacity=".8">${number(scaleBarKm)} km</text>
+    <g class="radar-plane" visibility="hidden">
       <circle r="17" fill="#7fd8c4" fill-opacity=".14"/>
       <circle r="26" fill="none" stroke="#7fd8c4" stroke-opacity=".35">
-        <animate attributeName="r" values="14;30" dur="2.6s" repeatCount="indefinite"/>
-        <animate attributeName="stroke-opacity" values=".55;0" dur="2.6s" repeatCount="indefinite"/>
+        <animate attributeName="r" values="14;30" dur="3.4s" repeatCount="indefinite"/>
+        <animate attributeName="stroke-opacity" values=".5;0" dur="3.4s" repeatCount="indefinite"/>
       </circle>
       <path d="M0 -13 4.6 -3 13 1.4 13 4 4.6 3 3.6 12 0 13.8 -3.6 12 -4.6 3 -13 4 -13 1.4 -4.6 -3Z" fill="#7fd8c4"/>
     </g>
@@ -478,49 +573,66 @@ function mountRadar({ canvas, readout, booking, compact = false }) {
   const svg = canvas.querySelector('svg');
   const trail = svg.querySelector('.radar-trail');
   const plane = svg.querySelector('.radar-plane');
-  const total = trail.getTotalLength();
 
-  const startProgress = Math.min(96, Math.max(1, Number(telemetry.progress) || 1));
-  const startLat = Number(telemetry.lat);
-  const startLon = Number(telemetry.lon);
-  const remaining = Math.max(1, 100 - startProgress);
-  let progress = startProgress;
-  let last = performance.now();
+  // One shared clock per record so the inline map and full console stay in step.
+  const clockKey = booking.bookingReference || booking.pnr || booking.flightNumber || 'record';
+  let clock = radarClocks.get(clockKey);
+  if (!clock) {
+    clock = { startedAt: performance.now(), startFraction, fractionPerSecond };
+    radarClocks.set(clockKey, clock);
+  }
+
+  let lastFraction = -1;
   let lastReadout = 0;
   let frame = 0;
 
-  const positionAt = (pct) => {
-    const ratio = Math.min(1, Math.max(0, (pct - startProgress) / remaining));
-    return {
-      lat: startLat + (Number(arrival.lat) - startLat) * ratio,
-      lon: startLon + (Number(arrival.lon) - startLon) * ratio
-    };
+  const currentFraction = () => {
+    const elapsed = (performance.now() - clock.startedAt) / 1000;
+    return Math.min(0.995, clock.startFraction + elapsed * clock.fractionPerSecond);
   };
 
   const paint = () => {
-    const fraction = progress / 100;
-    const point = trail.getPointAtLength(total * fraction);
-    const ahead = trail.getPointAtLength(total * Math.min(1, fraction + 0.01));
-    const angle = (Math.atan2(ahead.y - point.y, ahead.x - point.x) * 180) / Math.PI + 90;
-    plane.setAttribute('transform', `translate(${point.x} ${point.y}) rotate(${angle})`);
-    trail.setAttribute('stroke-dasharray', `${total * fraction} ${total}`);
+    const fraction = currentFraction();
+    const point = greatCirclePoint(from, to, fraction);
+    const position = project(point);
+    const ahead = project(greatCirclePoint(from, to, Math.min(1, fraction + 0.002)));
+    const angle = (Math.atan2(ahead.y - position.y, ahead.x - position.x) * 180) / Math.PI + 90;
+
+    plane.setAttribute('visibility', 'visible');
+    plane.setAttribute('transform', `translate(${position.x.toFixed(2)} ${position.y.toFixed(2)}) rotate(${angle.toFixed(2)})`);
+
+    const trailPoints = projected
+      .filter((_, index) => index / 72 <= fraction)
+      .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+    trailPoints.push(`${position.x.toFixed(1)},${position.y.toFixed(1)}`);
+    trail.setAttribute('points', trailPoints.join(' '));
   };
 
-  const paintReadout = (now) => {
-    const position = positionAt(progress);
-    const wobble = Math.sin(now / 2400);
-    const altitude = Math.max(0, Math.round((Number(telemetry.altitudeFt) || 0) + wobble * 40));
-    const speed = Math.max(0, Math.round((Number(telemetry.groundSpeedKts) || 0) + Math.cos(now / 3100) * 3));
+  const paintReadout = () => {
+    const fraction = currentFraction();
+    const point = greatCirclePoint(from, to, fraction);
+    const ahead = greatCirclePoint(from, to, Math.min(1, fraction + 0.002));
+    const track = bearingBetween(point, ahead);
+    const distanceFlown = totalKm * fraction;
+    const remainingKm = Math.max(0, totalKm - distanceFlown);
+    const wobble = Math.sin(performance.now() / 4200);
+    const altitude = Math.max(0, Math.round((Number(telemetry.altitudeFt) || 0) + wobble * 25));
+    const speed = Math.max(0, Math.round((Number(telemetry.groundSpeedKts) || 0) + Math.cos(performance.now() / 5200) * 2));
+
     const cells = [
       ['Flight', esc(booking.flightNumber)],
       ['Altitude', `${number(altitude)} ft`],
       ['Ground speed', `${number(speed)} kts`],
-      ['Track', `${number(telemetry.heading)}°`],
+      ['Position', `${point.lat.toFixed(2)} / ${point.lon.toFixed(2)}`],
+      ['Distance flown', formatDistance(distanceFlown)],
+      ['Remaining', `${formatDistance(remainingKm)} · ${formatDuration(remainingKm / speedKmh)}`],
+      ['Corridor', `${(fraction * 100).toFixed(1)}%`],
+      ['Playback', '60× (1 min = 1 h)'],
+      ['True track', `${number(Math.round(track))}°`],
       ['Squawk', esc(telemetry.squawk)],
-      ['Position', `${position.lat.toFixed(2)} / ${position.lon.toFixed(2)}`],
-      ['Corridor', `${progress.toFixed(1)}%`],
       ['Last ping', `${clockLabel()} UTC`]
     ];
+
     if (readout) {
       readout.innerHTML = (compact ? cells.slice(0, 6) : cells)
         .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
@@ -528,20 +640,22 @@ function mountRadar({ canvas, readout, booking, compact = false }) {
     }
   };
 
-  const tick = (now) => {
-    const delta = Math.min(120, now - last) / 1000;
-    last = now;
-    progress = Math.min(97.5, progress + delta * 0.5);
+  const tick = () => {
     paint();
-    if (now - lastReadout > 500) {
-      paintReadout(now);
+    const now = performance.now();
+    if (now - lastReadout > 700) {
+      paintReadout();
       lastReadout = now;
     }
-    frame = window.requestAnimationFrame(tick);
+    const fraction = currentFraction();
+    if (Math.abs(fraction - lastFraction) > 0.00001 || fraction < 0.995) {
+      lastFraction = fraction;
+      frame = window.requestAnimationFrame(tick);
+    }
   };
 
   paint();
-  paintReadout(performance.now());
+  paintReadout();
   frame = window.requestAnimationFrame(tick);
   radarStops.set(canvas, () => window.cancelAnimationFrame(frame));
 }

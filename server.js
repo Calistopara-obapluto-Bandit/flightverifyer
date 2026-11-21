@@ -239,6 +239,34 @@ function bearing(from, to) {
   return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
 }
 
+// Position along the great-circle track, so stored coordinates agree with the
+// map, the reported distance flown and the live radar.
+function greatCirclePosition(from, to, fraction) {
+  const toRadians = (value) => (value * Math.PI) / 180;
+  const toDegrees = (value) => (value * 180) / Math.PI;
+  const f = Math.min(1, Math.max(0, fraction));
+  const lat1 = toRadians(from[0]);
+  const lon1 = toRadians(from[1]);
+  const lat2 = toRadians(to[0]);
+  const lon2 = toRadians(to[1]);
+  const angle = 2 * Math.asin(Math.sqrt(
+    Math.sin((lat2 - lat1) / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+  ));
+  if (!Number.isFinite(angle) || angle < 1e-9) {
+    return [from[0], from[1]];
+  }
+  const a = Math.sin((1 - f) * angle) / Math.sin(angle);
+  const b = Math.sin(f * angle) / Math.sin(angle);
+  const x = a * Math.cos(lat1) * Math.cos(lon1) + b * Math.cos(lat2) * Math.cos(lon2);
+  const y = a * Math.cos(lat1) * Math.sin(lon1) + b * Math.cos(lat2) * Math.sin(lon2);
+  const z = a * Math.sin(lat1) + b * Math.sin(lat2);
+  return [
+    Math.round(toDegrees(Math.atan2(z, Math.hypot(x, y))) * 10000) / 10000,
+    Math.round(toDegrees(Math.atan2(y, x)) * 10000) / 10000
+  ];
+}
+
 function displayDate(value) {
   const parsed = new Date(`${value}T12:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return text(value, 40);
@@ -288,10 +316,7 @@ async function buildBooking(input) {
   const distanceTotalKm = depPoint && arrPoint ? haversineKm(depPoint, arrPoint) : 0;
   const heading = depPoint && arrPoint ? bearing(depPoint, arrPoint) : 0;
   const position = depPoint && arrPoint
-    ? [
-      Math.round((depPoint[0] + (arrPoint[0] - depPoint[0]) * (progress / 100)) * 10000) / 10000,
-      Math.round((depPoint[1] + (arrPoint[1] - depPoint[1]) * (progress / 100)) * 10000) / 10000
-    ]
+    ? greatCirclePosition(depPoint, arrPoint, progress / 100)
     : [null, null];
   const status = allowedStatuses.includes(text(input.status, 40)) ? text(input.status, 40) : allowedStatuses[0];
   const issuedAt = new Date().toISOString();
@@ -587,6 +612,14 @@ app.delete('/api/admin/bookings/:code', requireAdmin, requireDatabase, asyncRout
 app.use(express.static(publicDirectory, { extensions: ['html'] }));
 
 const normaliseCode = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+
+/* Lightweight liveness probe for uptime monitors and Render's health check.
+   Deliberately does not query Postgres so keep-alive pings do not consume
+   Neon free-tier compute hours. */
+app.get('/api/ping', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, service: 'verifymyflight', uptime: Math.round(process.uptime()) });
+});
 
 app.get('/api/health', asyncRoute(async (req, res) => {
   if (!pool) return res.status(503).json({ ok: false, database: 'not configured' });

@@ -1846,7 +1846,6 @@ h1 em {
 }
 
 .radar-canvas--inline {
-  max-height: 400px;
   overflow: hidden;
 }
 
@@ -1938,10 +1937,6 @@ h1 em {
 }
 
 @media (max-width: 720px) {
-  .radar-canvas--inline {
-    max-height: 240px;
-  }
-
   .live-map-head .mono {
     display: none;
   }
