@@ -249,6 +249,11 @@
             <legend><span class="mono">01</span> Route</legend>
             <div class="field-grid field-grid--3">
               <label>Service<input name="service" value="Shiparox Express" maxlength="60"></label>
+              <label>Service level<input name="serviceLevel" value="Express · door to door" maxlength="40"></label>
+              <label>Carrier<input name="courier" value="Shiparox Air" maxlength="80"></label>
+              <label>Delivery agent<input name="agent" value="D. Okon" maxlength="60"></label>
+              <label>Vehicle / run<input name="vehicle" value="Van · LAG-447-XA" maxlength="60"></label>
+              <label>Delivery window<input name="window" value="09:00–13:00" maxlength="40"></label>
               <label>Origin (city, country)<input name="origin" required value="Lagos, Nigeria" maxlength="90"></label>
               <label>Destination (city, country)<input name="destination" required value="London, United Kingdom" maxlength="90"></label>
               <label>Transit hub<input name="hub" value="Regional transit hub" maxlength="90"></label>
@@ -273,6 +278,16 @@
               <label>Contents<input name="contents" required value="Documents and sample kit" maxlength="120"></label>
               <label>Pieces<input name="pieces" type="number" min="1" max="999" value="1"></label>
               <label>Weight (kg)<input name="weightKg" type="number" min="0.1" step="0.1" value="2.5"></label>
+              <label>Declared value<input name="declaredValue" type="number" min="0" step="0.01" value="250"></label>
+              <label>Currency<input name="currency" value="USD" maxlength="3"></label>
+              <label>Customs
+                <select name="customs">
+                  <option value="cleared" selected>Cleared</option>
+                  <option value="pending">Awaiting clearance</option>
+                  <option value="not_required">Not required</option>
+                </select>
+              </label>
+              <label class="checkbox-field"><input name="insured" type="checkbox" checked> Insured shipment</label>
               <label>Estimated delivery<input name="etaAt" type="date" id="eta-date"></label>
             </div>
           </fieldset>

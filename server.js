@@ -739,14 +739,43 @@ function shipmentEvents(shipment) {
   return events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+const shipmentDefaults = {
+  serviceLevel: 'Express · door to door',
+  courier: 'Shiparox Air',
+  agent: 'Unassigned',
+  vehicle: '—',
+  window: '09:00–13:00',
+  declaredValue: 0,
+  currency: 'USD',
+  insured: false,
+  customs: 'cleared',
+  holdReason: ''
+};
+
+const customsStates = {
+  cleared: 'CLEARED',
+  pending: 'AWAITING CLEARANCE',
+  not_required: 'NOT REQUIRED'
+};
+
 function decorateShipment(shipment) {
-  const status = shipmentStatuses.includes(shipment.status) ? shipment.status : 'registered';
-  const events = shipmentEvents({ ...shipment, status });
+  const merged = { ...shipmentDefaults, ...shipment };
+  const status = shipmentStatuses.includes(merged.status) ? merged.status : 'registered';
+  const events = shipmentEvents({ ...merged, status });
+  const registered = Date.parse(merged.registeredAt);
+  const eta = Date.parse(merged.etaAt);
+  const barcodeDigits = squash(merged.trackingNumber).slice(-6).padEnd(6, '0');
   return {
-    ...shipment,
+    ...merged,
     status,
     statusLabel: shipmentStatusLabels[status],
     progress: shipmentProgress[status],
+    signedBy: merged.signedBy || merged.recipientName,
+    customsLabel: customsStates[merged.customs] || customsStates.cleared,
+    transitHours: Number.isFinite(registered) && Number.isFinite(eta)
+      ? Math.max(1, Math.round((eta - registered) / (60 * 60 * 1000)))
+      : null,
+    barcode: `SHPX ${barcodeDigits.replace(/(\d{3})(\d{3})/, '$1 $2')} ${squash(merged.trackingNumber).slice(0, 2)}`,
     events: events.slice().reverse(),
     lastEvent: events[events.length - 1] || null
   };
@@ -770,6 +799,16 @@ function buildShipment(input, code) {
     contents: text(input.contents, 120),
     pieces: integer(input.pieces, 1, 1, 999),
     weightKg: decimal(input.weightKg, 1),
+    serviceLevel: text(input.serviceLevel, 40) || shipmentDefaults.serviceLevel,
+    courier: text(input.courier, 80) || shipmentDefaults.courier,
+    agent: text(input.agent, 60) || shipmentDefaults.agent,
+    vehicle: text(input.vehicle, 60) || shipmentDefaults.vehicle,
+    window: text(input.window, 40) || shipmentDefaults.window,
+    declaredValue: decimal(input.declaredValue, 0),
+    currency: (upper(input.currency, 3) || shipmentDefaults.currency),
+    insured: input.insured === true || input.insured === 'true' || input.insured === 'on',
+    customs: Object.hasOwn(customsStates, text(input.customs, 20)) ? text(input.customs, 20) : shipmentDefaults.customs,
+    signedBy: text(input.signedBy, 80),
     registeredAt,
     etaAt,
     deliveredAt: status === 'delivered' ? isoOr(input.deliveredAt, now) : null,
@@ -1168,9 +1207,9 @@ app.get('/verify/:code', (req, res) => {
   res.sendFile(path.join(publicDirectory, 'index.html'));
 });
 
-// Parcel tracking lives on its own page, separate from the flight dossier.
+// Parcel tracking: /track looks a parcel up, /track/:code is its own dossier page.
 app.get('/track/:code', (req, res) => {
-  res.sendFile(path.join(publicDirectory, 'track.html'));
+  res.sendFile(path.join(publicDirectory, 'parcel.html'));
 });
 
 const normaliseCode = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, '');

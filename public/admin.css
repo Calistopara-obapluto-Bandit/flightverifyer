@@ -710,3 +710,19 @@
     grid-template-columns: 1fr;
   }
 }
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 22px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.checkbox-field input {
+  width: auto;
+  accent-color: var(--signal);
+}

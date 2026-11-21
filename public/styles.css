@@ -2548,3 +2548,239 @@ body.verify-page .result {
 @media (max-width: 720px) {
   .ledger-state { display: none; }
 }
+
+/* ---------- parcel dossier ---------- */
+
+.parcel-main {
+  padding-block: 26px 40px;
+}
+
+.parcel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  max-width: 980px;
+  margin: 0 auto 20px;
+}
+
+.parcel-loading {
+  max-width: 980px;
+  margin: 40px auto;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.parcel-journey {
+  padding: 26px 32px 4px;
+}
+
+.journey-rail {
+  position: relative;
+  height: 2px;
+  background: var(--line-strong);
+  margin-bottom: 22px;
+}
+
+.journey-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--teal);
+}
+
+.journey-pin {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--signal);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--ink);
+  transform: translate(-50%, -50%);
+}
+
+.journey-stops {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+.journey-stops > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.journey-stops > div:nth-child(2) { text-align: center; }
+.journey-stops > div:nth-child(3) { text-align: right; }
+
+.journey-stops b {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.journey-stops span {
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.parcel-window {
+  padding: 10px 32px 0;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.pod {
+  margin: 28px 32px 0;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.pod--pending {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: transparent;
+}
+
+.pod-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pod-head h3 {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pod-stamp {
+  padding: 4px 10px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  border: 1px solid var(--teal);
+  color: var(--teal);
+}
+
+.pod-stamp--pending {
+  border-color: var(--line-strong);
+  color: var(--ink-soft);
+}
+
+.pod-body {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.pod-body dt {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pod-body dd {
+  margin-top: 4px;
+  font-size: 14.5px;
+}
+
+.pod-signature {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px !important;
+  line-height: 1.1;
+}
+
+.parcel-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.parcel-barcode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.parcel-barcode__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 44px;
+  overflow: hidden;
+}
+
+.parcel-barcode__bars span {
+  display: block;
+  flex: none;
+  background: var(--ink);
+}
+
+.parcel-barcode p {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 860px) {
+  .pod-body { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .parcel-journey { padding-inline: 20px; }
+  .parcel-window { padding-inline: 20px; }
+  .pod { margin-inline: 20px; }
+  .pod-body { grid-template-columns: 1fr; }
+  .journey-stops { grid-template-columns: 1fr; gap: 10px; }
+  .journey-stops > div:nth-child(2),
+  .journey-stops > div:nth-child(3) { text-align: left; }
+}
+
+@media print {
+  .parcel-toolbar,
+  .topbar,
+  .footer,
+  .skip-link {
+    display: none !important;
+  }
+
+  .parcel-main {
+    width: 100%;
+    padding: 0;
+  }
+
+  .parcel {
+    max-width: none;
+    margin: 0;
+    border-color: #000;
+    box-shadow: none;
+  }
+
+  .parcel-journey,
+  .pod,
+  .parcel-card,
+  .scan {
+    break-inside: avoid;
+  }
+}

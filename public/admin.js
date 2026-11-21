@@ -370,9 +370,10 @@ if (shipmentForm) {
     setStatus(shipmentStatus, '');
     try {
       const values = Object.fromEntries(new FormData(shipmentForm));
-      for (const field of ['pieces', 'weightKg']) {
+      for (const field of ['pieces', 'weightKg', 'declaredValue']) {
         if (values[field] !== undefined && values[field] !== '') values[field] = Number(values[field]);
       }
+      values.insured = shipmentForm.elements.insured?.checked === true;
       const result = await api('/api/admin/shipments', { method: 'POST', body: JSON.stringify(values) });
       setStatus(shipmentStatus, `Tracking number created · ${result.code}`);
       shipmentCode.textContent = result.code;
