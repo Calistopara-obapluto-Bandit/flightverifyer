@@ -1,0 +1,265 @@
+'use strict';
+
+const $ = (selector) => document.querySelector(selector);
+
+const views = {
+  auth: $('#auth-view'),
+  console: $('#console-view')
+};
+
+const loginForm = $('#login-form');
+const loginStatus = $('#login-status');
+const loginSubmit = $('#login-submit');
+const signOut = $('#sign-out');
+const createForm = $('#create-form');
+const createStatus = $('#create-status');
+const createSubmit = $('#create-submit');
+const recordsBody = $('#records-body');
+const issuePanel = $('#issue-panel');
+const issueCode = $('#issue-code');
+const issueCopy = $('#issue-copy');
+const issueOpen = $('#issue-open');
+const issueDismiss = $('#issue-dismiss');
+
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[character]));
+
+async function api(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      Accept: 'application/json',
+      ...options.headers
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || 'The console could not complete that request.');
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function showConsole(email) {
+  views.auth.hidden = true;
+  views.console.hidden = false;
+  signOut.hidden = false;
+  if (email) signOut.dataset.email = email;
+  loadRecords();
+}
+
+function showAuth() {
+  views.console.hidden = true;
+  views.auth.hidden = false;
+  signOut.hidden = true;
+}
+
+function setStatus(element, message, isError = false) {
+  element.textContent = message;
+  if (isError) {
+    element.dataset.state = 'error';
+  } else {
+    delete element.dataset.state;
+  }
+}
+
+function copyLink(code) {
+  const link = `${location.origin}/#/verify/${encodeURIComponent(code)}`;
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(link);
+  }
+  const field = document.createElement('textarea');
+  field.value = link;
+  field.setAttribute('readonly', '');
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.appendChild(field);
+  field.select();
+  try {
+    document.execCommand('copy');
+  } finally {
+    field.remove();
+  }
+  return Promise.resolve();
+}
+
+/* ------------------------------------------------------------------ */
+/* Session                                                             */
+/* ------------------------------------------------------------------ */
+
+api('/api/admin/session')
+  .then((session) => showConsole(session.email))
+  .catch(() => showAuth());
+
+loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(loginForm));
+  loginSubmit.disabled = true;
+  loginSubmit.textContent = 'Signing in…';
+  setStatus(loginStatus, '');
+  try {
+    const session = await api('/api/admin/login', { method: 'POST', body: JSON.stringify(values) });
+    loginForm.reset();
+    showConsole(session.email);
+  } catch (error) {
+    setStatus(loginStatus, error.message, true);
+  } finally {
+    loginSubmit.disabled = false;
+    loginSubmit.textContent = 'Sign in';
+  }
+});
+
+signOut.addEventListener('click', async () => {
+  try {
+    await api('/api/admin/logout', { method: 'POST' });
+  } catch {
+    /* the local view still clears */
+  }
+  showAuth();
+  setStatus(loginStatus, 'Signed out.');
+});
+
+/* ------------------------------------------------------------------ */
+/* Records                                                             */
+/* ------------------------------------------------------------------ */
+
+const numberFields = [
+  'altitudeFt', 'groundSpeedKts', 'mach', 'progress', 'base', 'carrierSurcharges', 'taxes'
+];
+
+function payloadFromForm() {
+  const values = Object.fromEntries(new FormData(createForm));
+  for (const field of numberFields) {
+    if (values[field] !== undefined && values[field] !== '') values[field] = Number(values[field]);
+  }
+  return values;
+}
+
+createForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  createSubmit.disabled = true;
+  createSubmit.textContent = 'Issuing…';
+  setStatus(createStatus, '');
+  try {
+    const payload = payloadFromForm();
+    const result = await api('/api/admin/bookings', { method: 'POST', body: JSON.stringify(payload) });
+    setStatus(createStatus, `Record issued · ${result.code}`);
+    issueCode.textContent = result.code;
+    issueOpen.href = `/#/verify/${encodeURIComponent(result.code)}`;
+    issuePanel.hidden = false;
+    issuePanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await loadRecords();
+  } catch (error) {
+    setStatus(createStatus, error.message, true);
+    if (error.status === 401) showAuth();
+  } finally {
+    createSubmit.disabled = false;
+    createSubmit.textContent = 'Issue record & generate code';
+  }
+});
+
+issueCopy.addEventListener('click', async () => {
+  try {
+    await copyLink(issueCode.textContent.trim());
+    issueCopy.textContent = 'Link copied ✓';
+    window.setTimeout(() => { issueCopy.textContent = 'Copy client link'; }, 2200);
+  } catch {
+    issueCopy.textContent = 'Copy failed';
+  }
+});
+
+issueDismiss.addEventListener('click', () => {
+  issuePanel.hidden = true;
+  setStatus(createStatus, '');
+  createForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+async function loadRecords() {
+  try {
+    const { bookings } = await api('/api/admin/bookings');
+    renderRecords(bookings);
+    renderStats(bookings);
+  } catch (error) {
+    if (error.status === 401) {
+      showAuth();
+      return;
+    }
+    recordsBody.innerHTML = `<tr><td colspan="7" class="table-empty">${esc(error.message)}</td></tr>`;
+  }
+}
+
+function renderStats(bookings) {
+  const today = new Date().toISOString().slice(0, 10);
+  $('#stat-total').textContent = bookings.length;
+  $('#stat-enroute').textContent = bookings.filter((booking) => booking.status.startsWith('IN FLIGHT')).length;
+  $('#stat-today').textContent = bookings.filter((booking) => String(booking.createdAt || '').slice(0, 10) === today).length;
+}
+
+function renderRecords(bookings) {
+  if (!bookings.length) {
+    recordsBody.innerHTML = '<tr><td colspan="7" class="table-empty">No records yet. Issue the first one above.</td></tr>';
+    return;
+  }
+  recordsBody.innerHTML = bookings.map((booking) => {
+    const issued = booking.createdAt ? new Date(booking.createdAt).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric'
+    }) : '—';
+    return `<tr>
+      <td class="code">${esc(booking.code)}</td>
+      <td>${esc(booking.flightNumber)}<br><span class="mono">${esc(booking.airline)}</span></td>
+      <td class="mono">${esc(booking.route)}</td>
+      <td>${esc(booking.passenger)}</td>
+      <td class="mono">${esc(booking.status)}</td>
+      <td class="mono">${esc(issued)}</td>
+      <td>
+        <div class="row-actions">
+          <button type="button" class="mini-button" data-copy="${esc(booking.code)}">Copy link</button>
+          <a class="mini-button" href="/#/verify/${encodeURIComponent(booking.code)}" target="_blank" rel="noopener">Open</a>
+          <button type="button" class="mini-button danger" data-delete="${esc(booking.code)}">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+recordsBody.addEventListener('click', async (event) => {
+  const copyButton = event.target.closest('[data-copy]');
+  if (copyButton) {
+    try {
+      await copyLink(copyButton.dataset.copy);
+      copyButton.textContent = 'Copied ✓';
+      window.setTimeout(() => { copyButton.textContent = 'Copy link'; }, 2000);
+    } catch {
+      copyButton.textContent = 'Failed';
+    }
+    return;
+  }
+
+  const deleteButton = event.target.closest('[data-delete]');
+  if (!deleteButton) return;
+  const code = deleteButton.dataset.delete;
+  if (!window.confirm(`Delete verification record ${code}? The client link will stop resolving.`)) return;
+  deleteButton.disabled = true;
+  try {
+    await api(`/api/admin/bookings/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    await loadRecords();
+    if (issueCode.textContent.trim() === code) issuePanel.hidden = true;
+  } catch (error) {
+    window.alert(error.message);
+    deleteButton.disabled = false;
+  }
+});
+
+$('#refresh-records').addEventListener('click', loadRecords);
+
+/* Default the departure date to tomorrow, local time. */
+const dateField = $('#dep-date');
+if (dateField && !dateField.value) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  dateField.value = tomorrow.toISOString().slice(0, 10);
+}

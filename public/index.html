@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VerifyMyFlight — Booking verification desk</title>
+  <meta name="description" content="Verify a flight booking against the reservation ledger. Open the itinerary, passenger manifest, fare receipt and live aircraft telemetry.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#top" aria-label="VerifyMyFlight home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M4 22.5 13.5 9l7 10.5L28 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13.5" cy="9" r="2.4" fill="currentColor"/><circle cx="28" cy="6" r="2.4" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-name">Verify<em>MyFlight</em></span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <button type="button" class="nav-link" data-modal="how">How it works</button>
+        <button type="button" class="nav-link" data-modal="radar">Live radar</button>
+        <button type="button" class="nav-link" data-modal="support">Support</button>
+      </nav>
+      <p class="ledger-state"><span class="pulse" aria-hidden="true"></span> Ledger online</p>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero shell" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span>01</span> Booking verification desk</p>
+        <h1>Every booking,<br><em>accounted for.</em></h1>
+        <p class="lede">Drop in a booking reference, e-ticket number or six-character PNR. We reconcile it against the reservation ledger, then open the itinerary, passenger manifest, fare receipt and live aircraft telemetry.</p>
+
+        <form id="verify-form" class="verify" novalidate>
+          <label for="code">Booking ID, e-ticket or PNR</label>
+          <div class="verify-row">
+            <input id="code" name="code" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="BX-H43TYYE" aria-describedby="verify-hint">
+            <button id="verify-button" type="submit" class="btn btn-primary">Check record</button>
+          </div>
+          <div class="verify-foot">
+            <p id="verify-hint">Sample record: <button type="button" class="sample" data-sample="BX-H43TYYE">BX-H43TYYE</button></p>
+            <p class="verify-status" id="verify-status" role="status" aria-live="polite"></p>
+          </div>
+        </form>
+
+        <dl class="stats">
+          <div><dt>Airlines reconciled</dt><dd>450+</dd></div>
+          <div><dt>Airports covered</dt><dd>1,200+</dd></div>
+          <div><dt>Telemetry feed</dt><dd>ADS-B</dd></div>
+        </dl>
+      </div>
+
+      <aside class="hero-board" aria-hidden="true">
+        <div class="board-card">
+          <div class="board-head">
+            <span class="mono">Ledger · live</span>
+            <span class="board-live"><span class="pulse"></span> streaming</span>
+          </div>
+          <p class="board-route">LOS <span class="board-arc"><svg viewBox="0 0 160 40" preserveAspectRatio="none"><path d="M4 34C46 2 112 2 156 26" stroke="currentColor" stroke-width="1.6" fill="none" stroke-dasharray="5 5"/><circle cx="4" cy="34" r="3" fill="currentColor"/><circle cx="156" cy="26" r="3" fill="currentColor"/><path d="m100 11 9 2-5 8z" fill="currentColor"/></svg></span> LHR</p>
+          <div class="board-rows">
+            <div><span>Altitude</span><b>37,000 ft</b></div>
+            <div><span>Ground speed</span><b>489 kts</b></div>
+            <div><span>Squawk</span><b>4417</b></div>
+            <div><span>Position</span><b>30.21N / 4.38E</b></div>
+          </div>
+          <div class="board-progress"><span style="width:58%"></span></div>
+          <p class="board-note mono">58% of corridor · G-ZBKA / B789</p>
+        </div>
+        <div class="board-card board-card--offset">
+          <p class="board-label">Verified in the last minute</p>
+          <p class="board-big">128</p>
+          <p class="board-note mono">Bookings · tickets · manifests</p>
+        </div>
+        <div class="board-stamp">CHECKED<br>AGAINST<br>CARRIER</div>
+      </aside>
+    </section>
+
+    <section id="result" class="result shell" aria-live="polite"></section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <p>VerifyMyFlight · Booking verification desk</p>
+      <p class="mono">Reconciled with carrier reservation records · telemetry via ADS-B</p>
+      <p><button type="button" class="link-button" data-modal="how">Method</button> · <button type="button" class="link-button" data-modal="support">Support desk</button></p>
+    </div>
+  </footer>
+
+  <!-- How it works -->
+  <div class="modal" id="modal-how" role="dialog" aria-modal="true" aria-labelledby="how-title" hidden>
+    <div class="modal-panel">
+      <div class="modal-head">
+        <p class="eyebrow"><span>02</span> Method</p>
+        <button type="button" class="icon-button" data-close aria-label="Close verification guide">✕</button>
+      </div>
+      <h2 id="how-title">How a record is verified</h2>
+      <ol class="steps">
+        <li>
+          <span class="mono">01</span>
+          <div><h3>Normalise the reference</h3><p>Spaces and dashes are stripped, then the reference is matched against booking IDs, e-ticket numbers and PNRs in the ledger.</p></div>
+        </li>
+        <li>
+          <span class="mono">02</span>
+          <div><h3>Reconcile the reservation</h3><p>The record is checked against the carrier reservation entry: ticket status, itinerary sectors, cabin, fare basis and issuing office.</p></div>
+        </li>
+        <li>
+          <span class="mono">03</span>
+          <div><h3>Attach the manifest</h3><p>Passengers, seats, baggage allowance and special service requests are attached to the booking so the dossier is complete.</p></div>
+        </li>
+        <li>
+          <span class="mono">04</span>
+          <div><h3>Read the aircraft</h3><p>For flights in the air, the aircraft's ADS-B transponder supplies position, altitude, speed and heading for the telemetry panel and radar console.</p></div>
+        </li>
+      </ol>
+      <p class="modal-note">Verification confirms what the reservation ledger holds. Boarding still requires the airline's own documents and a valid travel document. Check gates and times with the carrier at least 24 hours before departure.</p>
+      <button type="button" class="btn btn-ghost" data-close>Done</button>
+    </div>
+  </div>
+
+  <!-- Radar -->
+  <div class="modal modal--wide" id="modal-radar" role="dialog" aria-modal="true" aria-labelledby="radar-title" hidden>
+    <div class="modal-panel radar-panel">
+      <div class="modal-head">
+        <p class="eyebrow"><span>03</span> Telemetry console</p>
+        <button type="button" class="icon-button" data-close aria-label="Close radar console">✕</button>
+      </div>
+      <h2 id="radar-title">Live route console</h2>
+      <div class="radar" id="radar">
+        <svg id="radar-map" viewBox="0 0 760 360" role="img" aria-label="Route corridor with aircraft position">
+          <defs>
+            <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
+              <path d="M38 0H0v38" fill="none" stroke="currentColor" stroke-opacity=".16" stroke-width="1"/>
+            </pattern>
+          </defs>
+          <rect width="760" height="360" fill="url(#grid)"/>
+          <g id="radar-rings" fill="none" stroke="currentColor" stroke-opacity=".22">
+            <circle cx="380" cy="180" r="60"/><circle cx="380" cy="180" r="110"/><circle cx="380" cy="180" r="160"/>
+          </g>
+          <path id="radar-path" d="" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="2" stroke-dasharray="7 7"/>
+          <g id="radar-points"></g>
+          <g id="radar-plane" transform="translate(380 180)">
+            <circle r="16" fill="currentColor" fill-opacity=".12"/>
+            <path d="M0 -12 5 -2 12 2 12 5 4 4 3 12 0 14 -3 12 -4 4 -12 5 -12 2 -5 -2Z" fill="currentColor"/>
+          </g>
+          <g id="radar-labels" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor"></g>
+        </svg>
+        <div class="radar-readout" id="radar-readout">
+          <p class="mono">No record loaded</p>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost" data-close>Exit console</button>
+    </div>
+  </div>
+
+  <!-- Support -->
+  <div class="modal" id="modal-support" role="dialog" aria-modal="true" aria-labelledby="support-title" hidden>
+    <div class="modal-panel">
+      <div class="modal-head">
+        <p class="eyebrow"><span>04</span> Support desk</p>
+        <button type="button" class="icon-button" data-close aria-label="Close support desk">✕</button>
+      </div>
+      <h2 id="support-title">Passenger support desk</h2>
+      <p class="modal-note">Send a request about a booking, manifest entry, schedule change or seat assignment. Requests are logged with a reference you can quote back to the desk.</p>
+      <form id="support-form" class="support-form" novalidate>
+        <div class="field-grid">
+          <label>Full name<input name="name" required minlength="2" maxlength="90" autocomplete="name"></label>
+          <label>Email address<input name="email" type="email" required maxlength="160" autocomplete="email"></label>
+        </div>
+        <div class="field-grid">
+          <label>Category
+            <select name="category" required>
+              <option>Booking &amp; ticket verification</option>
+              <option>Passenger manifest correction</option>
+              <option>Flight delay / schedule change</option>
+              <option>Baggage &amp; seat assignment</option>
+              <option>Urgent dispatch escalation</option>
+            </select>
+          </label>
+          <label>Priority
+            <select name="priority" required>
+              <option>Standard</option>
+              <option>High — flying within 24h</option>
+              <option>Urgent — at airport</option>
+            </select>
+          </label>
+        </div>
+        <label>Message<textarea name="message" rows="4" required minlength="12" maxlength="2000" placeholder="Booking reference and what you need checked or corrected."></textarea></label>
+        <p class="form-status" id="support-status" role="status" aria-live="polite"></p>
+        <button type="submit" class="btn btn-primary" id="support-submit">Send to support desk</button>
+      </form>
+      <p class="modal-footnote mono">Encrypted dispatch · typical reply within one business day</p>
+    </div>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

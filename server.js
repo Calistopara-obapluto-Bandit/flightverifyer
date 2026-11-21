@@ -1,105 +1,148 @@
 const express = require('express');
-const fs = require('node:fs/promises');
 const path = require('node:path');
+const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
-const { promisify } = require('node:util');
-
-const scrypt = promisify(crypto.scrypt);
+const { Pool } = require('pg');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
+const publicDirectory = path.join(__dirname, 'public');
 const dataDirectory = path.join(__dirname, 'data');
-const usersFile = path.join(dataDirectory, 'users.json');
-const requestsFile = path.join(dataDirectory, 'funding-requests.json');
-const sessions = new Map();
-const sessionLifetime = 1000 * 60 * 60 * 24 * 7;
-const allowedAssets = ['BTC', 'ETH', 'SOL'];
-const marketIds = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana' };
-const fallbackMarkets = [
-  { symbol: 'BTC', name: 'Bitcoin', price: 68420.55, change24h: 2.48, volume: '28.4B', color: '#f7931a' },
-  { symbol: 'ETH', name: 'Ethereum', price: 3528.2, change24h: 1.16, volume: '14.2B', color: '#627eea' },
-  { symbol: 'SOL', name: 'Solana', price: 162.84, change24h: -0.82, volume: '3.8B', color: '#7c67f7' }
-];
+const supportFile = path.join(dataDirectory, 'support-requests.json');
+const connectionString = String(process.env.DATABASE_URL || '').trim();
 
-const initialAccount = () => ({
-  cashUsd: 25000,
-  holdings: { BTC: 0, ETH: 0, SOL: 0 },
-  ledger: [],
-  createdAt: new Date().toISOString()
-});
+/* ------------------------------------------------------------------ */
+/* Neon Postgres storage                                               */
+/* ------------------------------------------------------------------ */
 
-let marketCache = { updatedAt: 0, assets: fallbackMarkets, source: 'demo' };
+const needsSsl = connectionString
+  && !/^postgres(ql)?:\/\/[^/]*(localhost|127\.0\.0\.1)/i.test(connectionString);
 
-app.disable('x-powered-by');
-app.use(express.json({ limit: '10kb' }));
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+const pool = connectionString
+  ? new Pool({
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    ssl: needsSsl ? { rejectUnauthorized: false } : undefined
+  })
+  : null;
+
+if (pool && typeof pool.on === 'function') {
+  pool.on('error', (error) => {
+    console.error('[db] idle client error:', error.message);
+  });
+}
+
+const parsePayload = (payload) => (typeof payload === 'string' ? JSON.parse(payload) : payload);
+
+const seedBookings = require('./data/bookings.json');
+
+async function initDatabase() {
+  if (!pool) {
+    console.error('[db] DATABASE_URL is not set. Add your Neon connection string to the environment; the desk will answer 503 until then.');
+    return false;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      code TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM bookings');
+  if (Number(rows[0].count) === 0) {
+    for (const [code, booking] of Object.entries(seedBookings)) {
+      await pool.query(
+        `INSERT INTO bookings (code, payload, created_at)
+         VALUES ($1, $2::jsonb, $3)
+         ON CONFLICT (code) DO NOTHING`,
+        [code, JSON.stringify(booking), booking.issuedAt || new Date().toISOString()]
+      );
+    }
+    console.log(`[db] seeded ${Object.keys(seedBookings).length} verification records`);
+  }
+  return true;
+}
+
+async function initWithRetry(attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await initDatabase();
+    } catch (error) {
+      console.error(`[db] initialisation attempt ${attempt} failed: ${error.message}`);
+      if (attempt === attempts) return false;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  return false;
+}
+
+let databaseReady = false;
+
+function requireDatabase(req, res, next) {
+  if (!pool || !databaseReady) {
+    return res.status(503).json({
+      error: 'The verification ledger is not connected yet. Set DATABASE_URL to the Neon connection string and restart the desk.'
+    });
+  }
   next();
-});
-
-async function writeAccount(account, userId) {
-  if (!userId) throw new Error('Account owner is required.');
-  await fs.mkdir(dataDirectory, { recursive: true });
-  const accountFile = path.join(dataDirectory, `account-${userId}.json`);
-  const temporaryFile = `${accountFile}.tmp`;
-  await fs.writeFile(temporaryFile, JSON.stringify(account, null, 2));
-  await fs.rename(temporaryFile, accountFile);
 }
 
-async function readJsonFile(file, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8'));
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    return fallback;
-  }
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
-async function writeJsonFile(file, value) {
-  await fs.mkdir(dataDirectory, { recursive: true });
-  const temporaryFile = `${file}.tmp`;
-  await fs.writeFile(temporaryFile, JSON.stringify(value, null, 2));
-  await fs.rename(temporaryFile, file);
+async function readBookingRow(code) {
+  if (!code) return null;
+  const { rows } = await pool.query('SELECT payload FROM bookings WHERE code = $1', [code]);
+  return rows[0]?.payload ? parsePayload(rows[0].payload) : null;
 }
 
-async function readUsers() {
-  return readJsonFile(usersFile, []);
+async function allBookings() {
+  const { rows } = await pool.query('SELECT payload, created_at FROM bookings ORDER BY created_at DESC');
+  return rows.map((row) => ({
+    ...parsePayload(row.payload),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
+  }));
 }
 
-async function readFundingRequests() {
-  return readJsonFile(requestsFile, []);
+const squash = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+async function findBooking(code) {
+  if (!code) return null;
+  const direct = await readBookingRow(code);
+  if (direct) return direct;
+  const normalised = squash(code);
+  const bookings = await allBookings();
+  return bookings.find((booking) => {
+    const candidates = [
+      booking.pnr,
+      booking.bookingReference,
+      booking.flightNumber,
+      ...(booking.passengers || []).map((passenger) => passenger.ticketNumber)
+    ];
+    return candidates.filter(Boolean).some((value) => squash(value) === normalised);
+  }) || null;
 }
 
-async function readUserAccount(userId) {
-  const accountFile = path.join(dataDirectory, `account-${userId}.json`);
-  try {
-    return JSON.parse(await fs.readFile(accountFile, 'utf8'));
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    const account = initialAccount();
-    await writeAccount(account, userId);
-    return account;
-  }
-}
+/* ------------------------------------------------------------------ */
+/* Admin authentication                                                */
+/* ------------------------------------------------------------------ */
 
-function safeUser(user) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status, createdAt: user.createdAt };
-}
+const adminEmail = String(process.env.ADMIN_EMAIL || 'admin@verifymyflight.local').trim().toLowerCase();
+const adminPassword = String(process.env.ADMIN_PASSWORD || 'verify-admin-2026');
+const usingDefaultCredentials = !process.env.ADMIN_PASSWORD;
+const sessions = new Map();
+const loginAttempts = new Map();
+const sessionLifetime = 1000 * 60 * 60 * 8;
 
-async function hashPassword(password) {
-  const salt = crypto.randomBytes(16);
-  const hash = await scrypt(password, salt, 64);
-  return `${salt.toString('hex')}:${hash.toString('hex')}`;
-}
-
-async function verifyPassword(password, storedHash) {
-  const [saltHex, hashHex] = String(storedHash || '').split(':');
-  if (!saltHex || !hashHex) return false;
-  const expected = Buffer.from(hashHex, 'hex');
-  const actual = await scrypt(password, Buffer.from(saltHex, 'hex'), expected.length);
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+function safeEqual(left, right) {
+  const a = crypto.createHash('sha256').update(String(left)).digest();
+  const b = crypto.createHash('sha256').update(String(right)).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 function parseCookies(header = '') {
@@ -109,360 +152,535 @@ function parseCookies(header = '') {
   }).filter(([key]) => key));
 }
 
-function setSessionCookie(res, token) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `clearwave_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionLifetime / 1000}${secure}`);
-}
-
-function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', 'clearwave_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
-}
-
-async function requireUser(req, res, next) {
-  try {
-    const token = parseCookies(req.headers.cookie).clearwave_session;
-    const session = sessions.get(token);
-    if (!session || session.expiresAt < Date.now()) {
-      if (token) sessions.delete(token);
-      return res.status(401).json({ error: 'Sign in to continue.' });
-    }
-    const users = await readUsers();
-    const user = users.find((entry) => entry.id === session.userId);
-    if (!user || user.status !== 'active') return res.status(401).json({ error: 'This account is unavailable.' });
-    req.user = user;
-    next();
-  } catch (error) {
-    next(error);
-  }
-}
-
 function requireAdmin(req, res, next) {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Administrator access is required.' });
+  const token = parseCookies(req.headers.cookie).vmf_admin;
+  const session = token ? sessions.get(token) : null;
+  if (!session || session.expiresAt < Date.now()) {
+    if (token) sessions.delete(token);
+    return res.status(401).json({ error: 'Administrator sign-in required.' });
+  }
+  req.admin = session;
   next();
 }
 
-async function seedAdmin() {
-  const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || '';
-  if (!email || !password) return;
-  if (password.length < 12) throw new Error('ADMIN_PASSWORD must be at least 12 characters.');
-  const users = await readUsers();
-  const existing = users.find((user) => user.email === email);
-  if (existing) {
-    existing.role = 'admin';
-    existing.status = 'active';
-  } else {
-    users.push({
-      id: crypto.randomUUID(),
-      name: 'Administrator',
-      email,
-      passwordHash: await hashPassword(password),
-      role: 'admin',
-      status: 'active',
-      createdAt: new Date().toISOString()
-    });
+/* ------------------------------------------------------------------ */
+/* Booking builder                                                     */
+/* ------------------------------------------------------------------ */
+
+const AIRPORTS = {
+  LOS: [6.5774, 3.3212], ABV: [9.0068, 7.2632], PHC: [5.0155, 6.9496], KAN: [12.0476, 8.5246],
+  LHR: [51.47, -0.4543], LGW: [51.1537, -0.1821], MAN: [53.3537, -2.275], CDG: [49.0097, 2.5479],
+  ORY: [48.7233, 2.3794], AMS: [52.3105, 4.7683], FRA: [50.0379, 8.5622], MUC: [48.3538, 11.7861],
+  MAD: [40.4983, -3.5676], BCN: [41.2974, 2.0833], FCO: [41.8003, 12.2389], IST: [41.2753, 28.7519],
+  DXB: [25.2532, 55.3657], DOH: [25.2731, 51.6081], JNB: [-26.1367, 28.2411], CPT: [-33.9689, 18.6017],
+  NBO: [-1.3192, 36.9278], ADD: [8.9779, 38.7993], CAI: [30.1219, 31.4056], CMN: [33.3675, -7.5899],
+  ACC: [5.6052, -0.1668], ABJ: [5.2615, -3.9263], JFK: [40.6413, -73.7781], EWR: [40.6895, -74.1745],
+  LAX: [33.9416, -118.4085], SFO: [37.6213, -122.379], ORD: [41.9742, -87.9073], ATL: [33.6407, -84.4277],
+  MIA: [25.7959, -80.287], BOS: [42.3656, -71.0096], IAD: [38.9531, -77.4565], YYZ: [43.6777, -79.6248],
+  YVR: [49.1967, -123.1815], GRU: [-23.4356, -46.4731], EZE: [-34.8222, -58.5358], SIN: [1.3644, 103.9915],
+  HKG: [22.308, 113.9185], NRT: [35.7719, 140.3929], HND: [35.5494, 139.7798], ICN: [37.4602, 126.4407],
+  PEK: [40.0799, 116.6031], PVG: [31.1443, 121.8083], BKK: [13.69, 100.7501], KUL: [2.7456, 101.71],
+  DEL: [28.5562, 77.1], BOM: [19.0896, 72.8656], SYD: [-33.9399, 151.1753], MEL: [-37.669, 144.841]
+};
+
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomFrom(alphabet, length) {
+  let output = '';
+  for (let index = 0; index < length; index += 1) {
+    output += alphabet[crypto.randomInt(alphabet.length)];
   }
-  await writeJsonFile(usersFile, users);
+  return output;
 }
 
-async function getMarkets() {
-  if (Date.now() - marketCache.updatedAt < 30_000) return marketCache;
-
-  try {
-    const url = new URL('https://api.coingecko.com/api/v3/simple/price');
-    url.searchParams.set('ids', Object.values(marketIds).join(','));
-    url.searchParams.set('vs_currencies', 'usd');
-    url.searchParams.set('include_24hr_change', 'true');
-    const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!response.ok) throw new Error(`Market provider returned ${response.status}`);
-    const data = await response.json();
-    const assets = fallbackMarkets.map((asset) => {
-      const quote = data[marketIds[asset.symbol]];
-      if (!quote || !Number.isFinite(quote.usd)) throw new Error('Market provider response was incomplete');
-      return {
-        ...asset,
-        price: quote.usd,
-        change24h: Number.isFinite(quote.usd_24h_change) ? quote.usd_24h_change : 0
-      };
-    });
-    marketCache = { updatedAt: Date.now(), assets, source: 'live' };
-  } catch {
-    marketCache = { ...marketCache, updatedAt: Date.now(), source: 'demo' };
+async function uniqueCode() {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const code = `BX-${randomFrom(CODE_ALPHABET, 6)}`;
+    if (!(await readBookingRow(code))) return code;
   }
-
-  return marketCache;
+  throw new Error('Could not allocate a unique tracking code.');
 }
 
-function round(value, places = 8) {
-  const factor = 10 ** places;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
+const text = (value, max = 120) => String(value ?? '')
+  .replace(/[\u0000-\u001f\u007f]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, max);
+
+const upper = (value, max = 12) => text(value, max).toUpperCase();
+
+function integer(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
-function getAsset(symbol, markets) {
-  return markets.assets.find((asset) => asset.symbol === symbol);
+function decimal(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : fallback;
 }
 
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/app.css', (req, res) => res.sendFile(path.join(__dirname, 'app.css')));
-app.get('/app.js', (req, res) => res.sendFile(path.join(__dirname, 'app.js')));
-app.use('/images', express.static(path.join(__dirname, 'images'), { fallthrough: false }));
+function haversineKm(from, to) {
+  const toRadians = (value) => (value * Math.PI) / 180;
+  const earth = 6371;
+  const dLat = toRadians(to[0] - from[0]);
+  const dLon = toRadians(to[1] - from[1]);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRadians(from[0])) * Math.cos(toRadians(to[0])) * Math.sin(dLon / 2) ** 2;
+  return Math.round(earth * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
 
-app.post('/api/auth/register', async (req, res, next) => {
-  try {
-    const name = String(req.body?.name || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
-    if (name.length < 2 || name.length > 80 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 10 || password.length > 200) {
-      return res.status(400).json({ error: 'Enter your name, a valid email, and a password of at least 10 characters.' });
-    }
-    const users = await readUsers();
-    if (users.some((user) => user.email === email)) return res.status(409).json({ error: 'An account with that email already exists.' });
-    const user = {
-      id: crypto.randomUUID(),
-      name,
-      email,
-      passwordHash: await hashPassword(password),
-      role: 'client',
-      status: 'active',
-      createdAt: new Date().toISOString()
-    };
-    users.push(user);
-    await writeJsonFile(usersFile, users);
-    await writeAccount(initialAccount(), user.id);
-    const token = crypto.randomBytes(32).toString('hex');
-    sessions.set(token, { userId: user.id, expiresAt: Date.now() + sessionLifetime });
-    setSessionCookie(res, token);
-    res.status(201).json({ user: safeUser(user) });
-  } catch (error) {
-    next(error);
+function bearing(from, to) {
+  const toRadians = (value) => (value * Math.PI) / 180;
+  const dLon = toRadians(to[1] - from[1]);
+  const y = Math.sin(dLon) * Math.cos(toRadians(to[0]));
+  const x = Math.cos(toRadians(from[0])) * Math.sin(toRadians(to[0]))
+    - Math.sin(toRadians(from[0])) * Math.cos(toRadians(to[0])) * Math.cos(dLon);
+  return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
+}
+
+function displayDate(value) {
+  const parsed = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return text(value, 40);
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'
+  }).format(parsed);
+}
+
+function ticketName(fullName) {
+  const parts = text(fullName, 80).split(' ').filter(Boolean);
+  if (!parts.length) return 'PASSENGER';
+  const last = parts[parts.length - 1].toUpperCase();
+  const given = parts.slice(0, -1).map((part) => part[0].toUpperCase()).join(' ');
+  return given ? `${last} / ${given}` : last;
+}
+
+const allowedStatuses = [
+  'TICKETED · CONFIRMED',
+  'IN FLIGHT — EN ROUTE',
+  'CHECK-IN OPEN',
+  'SCHEDULED'
+];
+
+async function buildBooking(input) {
+  const code = await uniqueCode();
+  const pnr = randomFrom('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
+  const airline = text(input.airline, 60);
+  const airlineIata = upper(input.airlineIata, 3) || 'BA';
+  const flightNumber = upper(input.flightNumber, 12);
+  const depIata = upper(input.depIata, 3);
+  const arrIata = upper(input.arrIata, 3);
+  const depPoint = AIRPORTS[depIata] || null;
+  const arrPoint = AIRPORTS[arrIata] || null;
+  const progress = integer(input.progress, 62, 1, 99);
+  const cabin = text(input.cabin, 40) || 'Economy';
+  const passengerName = text(input.passengerName, 80);
+  const seat = upper(input.seat, 5);
+  const ticketNumber = `125-${randomFrom('0123456789', 10)}`;
+  const depDate = displayDate(text(input.depDate, 10));
+  const arrTime = text(input.arrTime, 12);
+  const depTime = text(input.depTime, 12);
+  const duration = text(input.duration, 12) || '—';
+  const base = decimal(input.base, 0);
+  const carrierSurcharges = decimal(input.carrierSurcharges, 0);
+  const taxes = decimal(input.taxes, 0);
+  const total = Math.round((base + carrierSurcharges + taxes) * 100) / 100;
+  const distanceTotalKm = depPoint && arrPoint ? haversineKm(depPoint, arrPoint) : 0;
+  const heading = depPoint && arrPoint ? bearing(depPoint, arrPoint) : 0;
+  const position = depPoint && arrPoint
+    ? [
+      Math.round((depPoint[0] + (arrPoint[0] - depPoint[0]) * (progress / 100)) * 10000) / 10000,
+      Math.round((depPoint[1] + (arrPoint[1] - depPoint[1]) * (progress / 100)) * 10000) / 10000
+    ]
+    : [null, null];
+  const status = allowedStatuses.includes(text(input.status, 40)) ? text(input.status, 40) : allowedStatuses[0];
+  const issuedAt = new Date().toISOString();
+  const bookedOn = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+  }).format(new Date());
+  const sequence = `SEQ ${String(crypto.randomInt(1, 240)).padStart(3, '0')}`;
+  const group = text(input.group, 20) || 'Group 3';
+
+  return {
+    bookingReference: code,
+    pnr,
+    status,
+    gds: text(input.gds, 70) || 'Amadeus Altea · carrier sync',
+    issuedAt,
+    bookedOn,
+    tier: upper(input.tier, 20) || 'STANDARD',
+    points: `${Math.round(total / 4).toLocaleString('en-US')} points`,
+    airline,
+    airlineIata,
+    flightNumber,
+    callsign: upper(input.callsign, 12) || `${airlineIata}${flightNumber.replace(/\D/g, '')}`,
+    departure: {
+      iata: depIata,
+      icao: upper(input.depIcao, 4) || `X${depIata}`,
+      city: text(input.depCity, 60),
+      country: text(input.depCountry, 60),
+      airport: text(input.depAirport, 90) || `${text(input.depCity, 60)} Airport`,
+      terminal: text(input.depTerminal, 8),
+      gate: upper(input.depGate, 8),
+      scheduled: depTime,
+      estimated: `${depTime} (On schedule)`,
+      timezone: text(input.depTimezone, 50) || 'UTC',
+      lat: depPoint ? depPoint[0] : null,
+      lon: depPoint ? depPoint[1] : null,
+      weather: text(input.depWeather, 70) || '—'
+    },
+    arrival: {
+      iata: arrIata,
+      icao: upper(input.arrIcao, 4) || `X${arrIata}`,
+      city: text(input.arrCity, 60),
+      country: text(input.arrCountry, 60),
+      airport: text(input.arrAirport, 90) || `${text(input.arrCity, 60)} Airport`,
+      terminal: text(input.arrTerminal, 8),
+      gate: upper(input.arrGate, 8),
+      baggage: text(input.arrBaggage, 30),
+      scheduled: arrTime,
+      estimated: `${arrTime} (On schedule)`,
+      timezone: text(input.arrTimezone, 50) || 'UTC',
+      lat: arrPoint ? arrPoint[0] : null,
+      lon: arrPoint ? arrPoint[1] : null,
+      weather: text(input.arrWeather, 70) || '—'
+    },
+    telemetry: {
+      aircraftType: text(input.aircraftType, 60) || 'Airbus A320neo',
+      icaoType: upper(input.icaoType, 6) || 'A20N',
+      registration: upper(input.registration, 10) || `G-${randomFrom('ABCDEFGHJKLMNPQRSTUVWXYZ', 4)}`,
+      icao24: upper(input.icao24, 8) || randomFrom('0123456789ABCDEF', 6),
+      altitudeFt: integer(input.altitudeFt, 36000, 0, 60000),
+      groundSpeedKts: integer(input.groundSpeedKts, 480, 0, 700),
+      mach: decimal(input.mach, 0.82),
+      heading: integer(input.heading, heading, 0, 359),
+      verticalRate: 0,
+      lat: position[0],
+      lon: position[1],
+      squawk: text(input.squawk, 4) || String(crypto.randomInt(1000, 7777)),
+      progress,
+      distanceTotalKm,
+      distanceFlownKm: Math.round(distanceTotalKm * (progress / 100))
+    },
+    segments: [
+      {
+        id: `SEG-${depIata}-${arrIata}`,
+        direction: 'Departing flight',
+        airline,
+        flightNumber,
+        aircraft: text(input.aircraftType, 60) || 'Airbus A320neo',
+        operatedBy: `Operated by ${airline}`,
+        stops: 'Nonstop',
+        cabin,
+        date: depDate,
+        depIata,
+        depAirport: text(input.depAirport, 90) || `${text(input.depCity, 60)} Airport`,
+        depTime,
+        depTerminalGate: `Terminal ${text(input.depTerminal, 8) || '1'} · Gate ${upper(input.depGate, 8) || '—'}`,
+        arrIata,
+        arrAirport: text(input.arrAirport, 90) || `${text(input.arrCity, 60)} Airport`,
+        arrTime,
+        arrTerminalGate: `Terminal ${text(input.arrTerminal, 8) || '1'} · Gate ${upper(input.arrGate, 8) || '—'}`,
+        duration
+      }
+    ],
+    passengers: [
+      {
+        fullName: passengerName.toUpperCase() || 'PASSENGER',
+        firstName: text(input.passengerName, 80).split(' ')[0] || '',
+        middleName: text(input.passengerName, 80).split(' ').slice(1, -1).join(' '),
+        lastName: text(input.passengerName, 80).split(' ').slice(-1)[0] || '',
+        gender: text(input.gender, 20) || '—',
+        ticketNumber,
+        seat,
+        cabin,
+        baggage: text(input.baggage, 60) || '1 × 23 kg checked + 1 cabin bag',
+        checkIn: 'BOOKED · CONFIRMED',
+        frequentFlyer: text(input.frequentFlyer, 55) || '—',
+        ssr: 'DOCS / VERIFIED',
+        group,
+        sequence,
+        fastTrack: Boolean(input.fastTrack),
+        requests: text(input.requests, 80) || 'None'
+      }
+    ],
+    fare: {
+      currency: upper(input.currency, 3) || 'USD',
+      base,
+      carrierSurcharges,
+      taxes,
+      total,
+      formOfPayment: text(input.formOfPayment, 40) || 'CARD ···· 0000',
+      fareBasis: upper(input.fareBasis, 10) || 'YLPXGB',
+      endorsements: text(input.endorsements, 140) || 'NON-REFUNDABLE / CHANGES PERMITTED WITH CARRIER FEE',
+      issuingOffice: text(input.issuingOffice, 60) || 'IATA #01492019 / AMADEUS GDS 1A'
+    },
+    boardingPass: {
+      name: ticketName(passengerName),
+      flightNumber,
+      fromIata: depIata,
+      fromCity: text(input.depCity, 60),
+      toIata: arrIata,
+      toCity: text(input.arrCity, 60),
+      gate: upper(input.depGate, 8) || '—',
+      terminal: text(input.depTerminal, 8) || '1',
+      boardingTime: text(input.boardingTime, 12) || depTime,
+      departureTime: depTime,
+      seat,
+      cabin,
+      group,
+      sequence,
+      ticketNumber,
+      pnr,
+      baggageTag: `TAG: ${airlineIata} ${randomFrom('0123456789', 7)} (1 PCS / 23KG)`,
+      barcode: `M1${ticketName(passengerName).replace(/[^A-Z0-9]/g, '')} E${pnr}${depIata}${arrIata}${airlineIata}${flightNumber.replace(/\D/g, '')} 021Y${seat.padStart(3, '0')} 100`
+    },
+    createdBy: 'admin'
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* App setup                                                           */
+/* ------------------------------------------------------------------ */
+
+app.disable('x-powered-by');
+app.use(express.json({ limit: '64kb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  if (req.path === '/admin' || req.path === '/admin.html' || req.path.startsWith('/admin/')) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   }
+  next();
 });
 
-app.post('/api/auth/login', async (req, res, next) => {
-  try {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
-    const users = await readUsers();
-    const user = users.find((entry) => entry.email === email);
-    if (!user || user.status !== 'active' || !(await verifyPassword(password, user.passwordHash))) {
-      return res.status(401).json({ error: 'Email or password is incorrect.' });
-    }
-    const token = crypto.randomBytes(32).toString('hex');
-    sessions.set(token, { userId: user.id, expiresAt: Date.now() + sessionLifetime });
-    setSessionCookie(res, token);
-    res.json({ user: safeUser(user) });
-  } catch (error) {
-    next(error);
-  }
+const supportCategories = [
+  'Booking & ticket verification',
+  'Passenger manifest correction',
+  'Flight delay / schedule change',
+  'Baggage & seat assignment',
+  'Urgent dispatch escalation'
+];
+
+function readJsonFile(file, fallback) {
+  return fs.readFile(file, 'utf8')
+    .then((content) => JSON.parse(content))
+    .catch((error) => {
+      if (error.code === 'ENOENT') return fallback;
+      throw error;
+    });
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin routes (before static so it stays unlinked and noindexed)      */
+/* ------------------------------------------------------------------ */
+
+app.get(['/admin', '/admin/'], (req, res) => {
+  res.sendFile(path.join(publicDirectory, 'admin.html'));
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  const token = parseCookies(req.headers.cookie).clearwave_session;
+app.post('/api/admin/login', (req, res) => {
+  const ip = req.ip || 'unknown';
+  const attempt = loginAttempts.get(ip);
+  if (attempt && attempt.resetAt > Date.now() && attempt.count >= 8) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
+  }
+
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  if (!safeEqual(email, adminEmail) || !safeEqual(password, adminPassword)) {
+    const current = attempt && attempt.resetAt > Date.now()
+      ? { count: attempt.count + 1, resetAt: attempt.resetAt }
+      : { count: 1, resetAt: Date.now() + 1000 * 60 * 10 };
+    loginAttempts.set(ip, current);
+    return res.status(401).json({ error: 'Email or password is incorrect.' });
+  }
+
+  loginAttempts.delete(ip);
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, { email: adminEmail, expiresAt: Date.now() + sessionLifetime });
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `vmf_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionLifetime / 1000}${secure}`);
+  res.json({ email: adminEmail });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const token = parseCookies(req.headers.cookie).vmf_admin;
   if (token) sessions.delete(token);
-  clearSessionCookie(res);
+  res.setHeader('Set-Cookie', 'vmf_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
   res.json({ signedOut: true });
 });
 
-app.get('/api/auth/me', requireUser, (req, res) => res.json({ user: safeUser(req.user) }));
+app.get('/api/admin/session', requireAdmin, (req, res) => {
+  res.json({ email: req.admin.email });
+});
 
-app.get('/api/overview', requireUser, async (req, res, next) => {
-  try {
-    const [account, markets] = await Promise.all([readUserAccount(req.user.id), getMarkets()]);
-    const positions = markets.assets.map((asset) => ({
-      ...asset,
-      quantity: account.holdings[asset.symbol] || 0,
-      value: round((account.holdings[asset.symbol] || 0) * asset.price, 2)
-    }));
-    const investedUsd = positions.reduce((total, asset) => total + asset.value, 0);
-    res.json({
-      account: { ...account, investedUsd: round(investedUsd, 2), totalUsd: round(account.cashUsd + investedUsd, 2) },
-      markets: markets.assets,
-      marketSource: markets.source,
-      marketUpdatedAt: markets.updatedAt
+app.get('/api/admin/bookings', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const rows = (await allBookings()).map((booking) => ({
+    code: booking.bookingReference,
+    pnr: booking.pnr,
+    airline: booking.airline,
+    flightNumber: booking.flightNumber,
+    route: `${booking.departure?.iata || '—'} → ${booking.arrival?.iata || '—'}`,
+    passenger: booking.passengers?.[0]?.fullName || '—',
+    status: booking.status,
+    createdAt: booking.createdAt || booking.issuedAt
+  }));
+  res.json({ bookings: rows });
+}));
+
+app.post('/api/admin/bookings', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const input = req.body || {};
+  const required = {
+    airline: 'airline',
+    flightNumber: 'flight number',
+    depIata: 'departure airport code',
+    depCity: 'departure city',
+    arrIata: 'arrival airport code',
+    arrCity: 'arrival city',
+    depDate: 'departure date',
+    depTime: 'departure time',
+    arrTime: 'arrival time',
+    passengerName: 'passenger name',
+    seat: 'seat',
+    cabin: 'cabin'
+  };
+  const missing = Object.entries(required)
+    .filter(([key]) => text(input[key]).length === 0)
+    .map(([, label]) => label);
+  if (missing.length) {
+    return res.status(400).json({ error: `Complete these fields: ${missing.join(', ')}.` });
+  }
+  if (!/^[A-Za-z]{3}$/.test(text(input.depIata)) || !/^[A-Za-z]{3}$/.test(text(input.arrIata))) {
+    return res.status(400).json({ error: 'Airport codes must be three letters (IATA).' });
+  }
+  if (text(input.depIata).toUpperCase() === text(input.arrIata).toUpperCase()) {
+    return res.status(400).json({ error: 'Departure and arrival airports must be different.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text(input.depDate))) {
+    return res.status(400).json({ error: 'Departure date must use the date picker.' });
+  }
+  if (decimal(input.base) < 0 || decimal(input.taxes) < 0 || decimal(input.carrierSurcharges) < 0) {
+    return res.status(400).json({ error: 'Fare amounts cannot be negative.' });
+  }
+
+  const booking = await buildBooking(input);
+  await pool.query(
+    `INSERT INTO bookings (code, payload, created_at) VALUES ($1, $2::jsonb, $3)`,
+    [booking.bookingReference, JSON.stringify(booking), booking.issuedAt]
+  );
+  res.status(201).json({ code: booking.bookingReference, booking });
+}));
+
+app.delete('/api/admin/bookings/:code', requireAdmin, requireDatabase, asyncRoute(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const result = await pool.query('DELETE FROM bookings WHERE code = $1', [code]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Record not found.' });
+  res.json({ deleted: code });
+}));
+
+/* ------------------------------------------------------------------ */
+/* Public API                                                          */
+/* ------------------------------------------------------------------ */
+
+app.use(express.static(publicDirectory, { extensions: ['html'] }));
+
+const normaliseCode = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+
+app.get('/api/health', asyncRoute(async (req, res) => {
+  if (!pool) return res.status(503).json({ ok: false, database: 'not configured' });
+  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM bookings');
+  res.json({ ok: true, database: 'neon', records: Number(rows[0].count) });
+}));
+
+app.get('/api/verify/:code', requireDatabase, asyncRoute(async (req, res) => {
+  const code = normaliseCode(req.params.code);
+  if (!code || code.length < 4 || code.length > 40) {
+    return res.status(400).json({ error: 'Enter a booking reference, ticket number or six-character PNR.' });
+  }
+  const booking = await findBooking(code);
+  if (!booking) {
+    return res.status(404).json({
+      error: `No active record matches ${code}. Check the reference and try again, or contact the support desk.`
     });
-  } catch (error) {
-    next(error);
   }
-});
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    booking,
+    verifiedAt: new Date().toISOString(),
+    source: 'VerifyMyFlight verification ledger'
+  });
+}));
 
-app.post('/api/orders', requireUser, async (req, res, next) => {
+app.post('/api/support', async (req, res, next) => {
   try {
-    const { side, symbol, amountUsd } = req.body || {};
-    const amount = Number(amountUsd);
-    if (!['buy', 'sell'].includes(side) || !allowedAssets.includes(symbol) || !Number.isFinite(amount) || amount < 5 || amount > 1_000_000) {
-      return res.status(400).json({ error: 'Choose a supported asset and enter an amount between $5 and $1,000,000.' });
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const category = String(req.body?.category || '').trim();
+    const priority = String(req.body?.priority || 'Standard').trim();
+    const message = String(req.body?.message || '').trim();
+
+    if (name.length < 2 || name.length > 90) {
+      return res.status(400).json({ error: 'Enter the passenger name for this request.' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 160) {
+      return res.status(400).json({ error: 'Enter a valid email address so the desk can reply.' });
+    }
+    if (!supportCategories.includes(category)) {
+      return res.status(400).json({ error: 'Choose a support category.' });
+    }
+    if (!['Standard', 'High — flying within 24h', 'Urgent — at airport'].includes(priority)) {
+      return res.status(400).json({ error: 'Choose a priority level.' });
+    }
+    if (message.length < 12 || message.length > 2000) {
+      return res.status(400).json({ error: 'Describe the request in at least 12 characters.' });
     }
 
-    const markets = await getMarkets();
-    const asset = getAsset(symbol, markets);
-    const fee = round(amount * 0.001, 2);
-    const quantity = round(amount / asset.price);
-    const account = await readUserAccount(req.user.id);
-
-    if (side === 'buy') {
-      if (amount + fee > account.cashUsd) return res.status(400).json({ error: 'Not enough demo cash for this order, including the 0.10% paper fee.' });
-      account.cashUsd = round(account.cashUsd - amount - fee, 2);
-      account.holdings[symbol] = round((account.holdings[symbol] || 0) + quantity);
-    } else {
-      if (quantity > (account.holdings[symbol] || 0)) return res.status(400).json({ error: `Not enough ${symbol} in this demo portfolio to sell that amount.` });
-      account.cashUsd = round(account.cashUsd + amount - fee, 2);
-      account.holdings[symbol] = round(account.holdings[symbol] - quantity);
-    }
-
-    const order = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      side,
-      symbol,
-      quantity,
-      price: asset.price,
-      amountUsd: amount,
-      feeUsd: fee,
-      createdAt: new Date().toISOString()
-    };
-    account.ledger.unshift(order);
-    account.ledger = account.ledger.slice(0, 100);
-    await writeAccount(account, req.user.id);
-    res.status(201).json({ order });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/funding-requests', requireUser, async (req, res, next) => {
-  try {
-    const { action, amountUsd, reference } = req.body || {};
-    const amount = Number(amountUsd);
-    if (!['deposit', 'withdrawal'].includes(action) || !Number.isFinite(amount) || amount < 10 || amount > 100_000) {
-      return res.status(400).json({ error: 'Enter a simulated deposit or withdrawal between $10 and $100,000.' });
-    }
-    const account = await readUserAccount(req.user.id);
-    const requests = await readFundingRequests();
-    const pendingWithdrawals = requests
-      .filter((request) => request.userId === req.user.id && request.action === 'withdrawal' && request.status === 'pending')
-      .reduce((sum, request) => sum + request.amountUsd, 0);
-    if (action === 'withdrawal' && amount > account.cashUsd - pendingWithdrawals) {
-      return res.status(400).json({ error: 'That exceeds available demo cash after pending withdrawal requests.' });
-    }
-    const fundingRequest = {
+    const request = {
       id: crypto.randomUUID(),
-      userId: req.user.id,
-      action,
-      amountUsd: round(amount, 2),
-      reference: String(reference || '').trim().slice(0, 100),
-      status: 'pending',
+      reference: `SUP-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+      name,
+      email,
+      category,
+      priority,
+      message,
+      status: 'received',
       createdAt: new Date().toISOString()
     };
-    requests.unshift(fundingRequest);
-    await writeJsonFile(requestsFile, requests);
-    res.status(201).json({ request: fundingRequest });
+
+    const existing = await readJsonFile(supportFile, []);
+    existing.unshift(request);
+    await fs.mkdir(dataDirectory, { recursive: true });
+    const temporaryFile = `${supportFile}.tmp`;
+    await fs.writeFile(temporaryFile, JSON.stringify(existing.slice(0, 500), null, 2));
+    await fs.rename(temporaryFile, supportFile);
+
+    res.status(201).json({ reference: request.reference, receivedAt: request.createdAt });
   } catch (error) {
     next(error);
   }
 });
-
-app.get('/api/funding-requests', requireUser, async (req, res, next) => {
-  try {
-    const requests = await readFundingRequests();
-    const visible = req.user.role === 'admin'
-      ? requests
-      : requests.filter((request) => request.userId === req.user.id);
-    res.json({ requests: visible });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/admin/summary', requireUser, requireAdmin, async (req, res, next) => {
-  try {
-    const [users, requests] = await Promise.all([readUsers(), readFundingRequests()]);
-    res.json({
-      clients: users.filter((user) => user.role === 'client').length,
-      pendingRequests: requests.filter((request) => request.status === 'pending').length,
-      requests
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/admin/users', requireUser, requireAdmin, async (req, res, next) => {
-  try {
-    const users = await readUsers();
-    const clients = users.filter((user) => user.role === 'client');
-    const summaries = await Promise.all(clients.map(async (user) => {
-      const account = await readUserAccount(user.id);
-      return { ...safeUser(user), cashUsd: account.cashUsd, ledgerCount: account.ledger.length };
-    }));
-    res.json({ users: summaries });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.patch('/api/admin/funding-requests/:id', requireUser, requireAdmin, async (req, res, next) => {
-  try {
-    const { status } = req.body || {};
-    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Choose approved or rejected.' });
-    const requests = await readFundingRequests();
-    const request = requests.find((entry) => entry.id === req.params.id);
-    if (!request) return res.status(404).json({ error: 'Funding request not found.' });
-    if (request.status !== 'pending') return res.status(409).json({ error: 'This request has already been reviewed.' });
-    if (status === 'approved') {
-      const account = await readUserAccount(request.userId);
-      if (request.action === 'withdrawal' && request.amountUsd > account.cashUsd) {
-        return res.status(409).json({ error: 'The client no longer has enough demo cash for this request.' });
-      }
-      account.cashUsd = round(account.cashUsd + (request.action === 'deposit' ? request.amountUsd : -request.amountUsd), 2);
-      account.ledger.unshift({
-        id: crypto.randomUUID(),
-        side: request.action === 'deposit' ? 'demo deposit approved' : 'demo withdrawal approved',
-        symbol: 'USD',
-        amountUsd: request.amountUsd,
-        createdAt: new Date().toISOString()
-      });
-      account.ledger = account.ledger.slice(0, 100);
-      await writeAccount(account, request.userId);
-    }
-    request.status = status;
-    request.reviewedAt = new Date().toISOString();
-    request.reviewedBy = req.user.id;
-    await writeJsonFile(requestsFile, requests);
-    res.json({ request });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.patch('/api/admin/users/:id/status', requireUser, requireAdmin, async (req, res, next) => {
-  try {
-    const { status } = req.body || {};
-    if (!['active', 'suspended'].includes(status)) return res.status(400).json({ error: 'Choose active or suspended.' });
-    if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot change your own account status.' });
-    const users = await readUsers();
-    const user = users.find((entry) => entry.id === req.params.id && entry.role === 'client');
-    if (!user) return res.status(404).json({ error: 'Client not found.' });
-    user.status = status;
-    await writeJsonFile(usersFile, users);
-    res.json({ user: safeUser(user) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/health', (req, res) => res.json({ ok: true, mode: 'paper-trading' }));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(publicDirectory, 'index.html'));
+});
+
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   console.error(error);
-  res.status(500).json({ error: 'The service could not complete that request.' });
+  res.status(500).json({ error: 'The verification desk could not complete that request.' });
 });
 
-seedAdmin().then(() => {
+initWithRetry().then((ready) => {
+  databaseReady = ready;
   app.listen(port, () => {
-    console.log(`Clearwave paper investing service listening on http://localhost:${port}`);
+    console.log(`VerifyMyFlight desk listening on http://localhost:${port}`);
+    console.log(`[db] Neon Postgres ${ready ? 'connected' : 'NOT connected'}`);
+    if (usingDefaultCredentials) {
+      console.warn('[admin] Using default sign-in admin@verifymyflight.local / verify-admin-2026 — set ADMIN_EMAIL and ADMIN_PASSWORD before deploying.');
+    }
   });
-}).catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
 });

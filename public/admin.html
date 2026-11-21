@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin console · VerifyMyFlight</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body class="admin-body">
+  <header class="admin-bar">
+    <div class="admin-shell admin-bar-inner">
+      <a class="brand" href="/" aria-label="VerifyMyFlight public desk">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M4 22.5 13.5 9l7 10.5L28 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13.5" cy="9" r="2.4" fill="currentColor"/><circle cx="28" cy="6" r="2.4" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-name">Verify<em>MyFlight</em></span>
+      </a>
+      <p class="admin-tag mono">Admin console</p>
+      <div class="admin-bar-actions">
+        <a class="admin-bar-link" href="/" target="_blank" rel="noopener">Public desk ↗</a>
+        <button type="button" class="btn btn-ghost btn-small" id="sign-out" hidden>Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-shell">
+    <!-- Sign in -->
+    <section class="admin-auth" id="auth-view">
+      <div class="auth-card">
+        <p class="eyebrow"><span>00</span> Restricted</p>
+        <h1 class="auth-title">Reservations <em>desk</em></h1>
+        <p class="auth-note">This console issues verification records. Sign in with the administrator credentials configured for this deployment.</p>
+        <form id="login-form" class="auth-form" novalidate>
+          <label>Email address<input name="email" type="email" autocomplete="username" required></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+          <p class="form-status" id="login-status" role="status" aria-live="polite"></p>
+          <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
+        </form>
+        <p class="auth-footnote mono">Authorised staff only · sessions expire after 8 hours</p>
+      </div>
+    </section>
+
+    <!-- Console -->
+    <section id="console-view" hidden>
+      <div class="console-head">
+        <div>
+          <p class="eyebrow"><span>01</span> Record desk</p>
+          <h1 class="console-title">Issue a flight record</h1>
+          <p class="console-note">Every saved record receives a unique <b>BX-</b> tracking code. Share that code with the client; it opens the public verification dossier.</p>
+        </div>
+        <dl class="console-stats">
+          <div><dt>Total records</dt><dd id="stat-total">—</dd></div>
+          <div><dt>En route</dt><dd id="stat-enroute">—</dd></div>
+          <div><dt>Issued today</dt><dd id="stat-today">—</dd></div>
+        </dl>
+      </div>
+
+      <section class="issue-panel" id="issue-panel" hidden aria-live="polite">
+        <div>
+          <p class="eyebrow"><span>✓</span> Record issued</p>
+          <p class="issue-code" id="issue-code">BX-XXXXXX</p>
+          <p class="issue-note">Give this tracking code to the client. It resolves to the full dossier on the public desk.</p>
+        </div>
+        <div class="issue-actions">
+          <button type="button" class="btn btn-primary btn-small" id="issue-copy">Copy client link</button>
+          <a class="btn btn-ghost btn-small" id="issue-open" href="#" target="_blank" rel="noopener">Open dossier ↗</a>
+          <button type="button" class="btn btn-ghost btn-small" id="issue-dismiss">New record</button>
+        </div>
+      </section>
+
+      <form id="create-form" class="create-form" novalidate>
+        <fieldset class="form-section">
+          <legend><span class="mono">01</span> Flight</legend>
+          <div class="field-grid field-grid--3">
+            <label>Airline<input name="airline" required value="British Airways" maxlength="60"></label>
+            <label>Airline IATA<input name="airlineIata" value="BA" maxlength="3"></label>
+            <label>Flight number<input name="flightNumber" required value="BA 075" maxlength="12"></label>
+            <label>Callsign<input name="callsign" placeholder="BAW75" maxlength="12"></label>
+            <label>Status
+              <select name="status">
+                <option>TICKETED · CONFIRMED</option>
+                <option selected>IN FLIGHT — EN ROUTE</option>
+                <option>CHECK-IN OPEN</option>
+                <option>SCHEDULED</option>
+              </select>
+            </label>
+            <label>Reservation system<input name="gds" value="Amadeus Altea · carrier sync" maxlength="70"></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+          <legend><span class="mono">02</span> Departure</legend>
+          <div class="field-grid field-grid--3">
+            <label>Airport code (IATA)<input name="depIata" required value="LOS" maxlength="3" placeholder="LOS"></label>
+            <label>City<input name="depCity" required value="Lagos" maxlength="60"></label>
+            <label>Country<input name="depCountry" value="Nigeria" maxlength="60"></label>
+            <label class="span-2">Airport name<input name="depAirport" value="Murtala Muhammed International Airport" maxlength="90"></label>
+            <label>Terminal<input name="depTerminal" value="1" maxlength="8"></label>
+            <label>Gate<input name="depGate" value="D8" maxlength="8"></label>
+            <label>Date<input name="depDate" type="date" required id="dep-date"></label>
+            <label>Local time<input name="depTime" required value="07:10 WAT" maxlength="12"></label>
+            <label>Time zone<input name="depTimezone" value="Africa/Lagos" maxlength="50"></label>
+            <label class="span-2">Weather note<input name="depWeather" value="29°C · Hazy · Visibility 8 km" maxlength="70"></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+          <legend><span class="mono">03</span> Arrival</legend>
+          <div class="field-grid field-grid--3">
+            <label>Airport code (IATA)<input name="arrIata" required value="LHR" maxlength="3" placeholder="LHR"></label>
+            <label>City<input name="arrCity" required value="London" maxlength="60"></label>
+            <label>Country<input name="arrCountry" value="United Kingdom" maxlength="60"></label>
+            <label class="span-2">Airport name<input name="arrAirport" value="London Heathrow Airport" maxlength="90"></label>
+            <label>Terminal<input name="arrTerminal" value="5" maxlength="8"></label>
+            <label>Gate<input name="arrGate" value="B36" maxlength="8"></label>
+            <label>Baggage belt<input name="arrBaggage" value="Carousel 7" maxlength="30"></label>
+            <label>Local time<input name="arrTime" required value="13:25 GMT" maxlength="12"></label>
+            <label>Time zone<input name="arrTimezone" value="Europe/London" maxlength="50"></label>
+            <label class="span-2">Weather note<input name="arrWeather" value="9°C · Overcast" maxlength="70"></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+          <legend><span class="mono">04</span> Aircraft & telemetry</legend>
+          <div class="field-grid field-grid--3">
+            <label class="span-2">Aircraft type<input name="aircraftType" value="Boeing 787-9 Dreamliner" maxlength="60"></label>
+            <label>ICAO type<input name="icaoType" value="B789" maxlength="6"></label>
+            <label>Registration<input name="registration" value="G-ZBKA" maxlength="10"></label>
+            <label>ICAO24 hex<input name="icao24" value="406B1F" maxlength="8"></label>
+            <label>Squawk<input name="squawk" value="4417" maxlength="4"></label>
+            <label>Altitude (ft)<input name="altitudeFt" type="number" min="0" max="60000" value="37000"></label>
+            <label>Ground speed (kts)<input name="groundSpeedKts" type="number" min="0" max="700" value="489"></label>
+            <label>Mach<input name="mach" type="number" step="0.01" min="0" max="2" value="0.85"></label>
+            <label>Corridor progress (%)<input name="progress" type="number" min="1" max="99" value="58"></label>
+            <label>Duration<input name="duration" value="6h 15m" maxlength="12"></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+          <legend><span class="mono">05</span> Passenger</legend>
+          <div class="field-grid field-grid--3">
+            <label class="span-2">Full name (as on passport)<input name="passengerName" required value="Alex Michael Jordan" maxlength="80"></label>
+            <label>Gender<input name="gender" value="Male" maxlength="20"></label>
+            <label>Seat<input name="seat" required value="21K" maxlength="5"></label>
+            <label>Cabin
+              <select name="cabin" required>
+                <option>Economy</option>
+                <option selected>Premium Economy</option>
+                <option>Business Class</option>
+                <option>First Class</option>
+              </select>
+            </label>
+            <label>Frequent flyer<input name="frequentFlyer" value="BA-EXEC-4471902 (SILVER)" maxlength="55"></label>
+            <label class="span-2">Baggage allowance<input name="baggage" value="2 × 23 kg checked + 1 cabin bag" maxlength="60"></label>
+            <label>Boarding group<input name="group" value="Group 3" maxlength="20"></label>
+            <label>Boarding time<input name="boardingTime" value="06:30" maxlength="12"></label>
+            <label>Special requests<input name="requests" value="Window seat · Vegetarian meal" maxlength="80"></label>
+            <label>Tier<input name="tier" value="SILVER" maxlength="20"></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+          <legend><span class="mono">06</span> Fare receipt</legend>
+          <div class="field-grid field-grid--3">
+            <label>Currency<input name="currency" value="USD" maxlength="3"></label>
+            <label>Base fare<input name="base" type="number" min="0" step="0.01" value="1486.00"></label>
+            <label>Carrier surcharges<input name="carrierSurcharges" type="number" min="0" step="0.01" value="212.00"></label>
+            <label>Taxes & fees<input name="taxes" type="number" min="0" step="0.01" value="178.40"></label>
+            <label>Fare basis<input name="fareBasis" value="YLPXGB" maxlength="10"></label>
+            <label>Form of payment<input name="formOfPayment" value="VISA ···· 4218" maxlength="40"></label>
+            <label class="span-2">Endorsements<input name="endorsements" value="NON-REFUNDABLE / CHANGES PERMITTED WITH CARRIER FEE" maxlength="140"></label>
+            <label>Issuing office<input name="issuingOffice" value="IATA #01492019 / AMADEUS GDS 1A" maxlength="60"></label>
+          </div>
+        </fieldset>
+
+        <div class="form-actions">
+          <p class="form-status" id="create-status" role="status" aria-live="polite"></p>
+          <button type="submit" class="btn btn-primary" id="create-submit">Issue record & generate code</button>
+        </div>
+      </form>
+
+      <section class="records">
+        <div class="records-head">
+          <div>
+            <p class="eyebrow"><span>02</span> Ledger</p>
+            <h2 class="records-title">Issued records</h2>
+          </div>
+          <button type="button" class="btn btn-ghost btn-small" id="refresh-records">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table class="records-table">
+            <thead>
+              <tr><th>Tracking code</th><th>Flight</th><th>Route</th><th>Passenger</th><th>Status</th><th>Issued</th><th><span class="visually-hidden">Actions</span></th></tr>
+            </thead>
+            <tbody id="records-body">
+              <tr><td colspan="7" class="table-empty">Loading records…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/admin.js" defer></script>
+</body>
+</html>
