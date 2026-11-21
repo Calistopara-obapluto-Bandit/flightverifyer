@@ -646,7 +646,7 @@ function readJsonFile(file, fallback) {
 /* Support email delivery (Resend HTTP API)                            */
 /* ------------------------------------------------------------------ */
 
-const supportRecipient = String(process.env.SUPPORT_EMAIL || 'support@sbiamautos.com').trim();
+const supportRecipient = String(process.env.SUPPORT_EMAIL || 'support.sbiamautos@gmail.com').trim();
 const supportSender = String(process.env.SUPPORT_FROM || 'flightverifyer desk <onboarding@resend.dev>').trim();
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
 
