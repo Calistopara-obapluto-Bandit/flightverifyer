@@ -643,12 +643,21 @@ function readJsonFile(file, fallback) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Support email delivery (Resend HTTP API)                            */
+/* Support email delivery                                              */
+/* Resend API key → HTTPS mail relay (no account) → logged only        */
 /* ------------------------------------------------------------------ */
 
 const supportRecipient = String(process.env.SUPPORT_EMAIL || 'support.sbiamautos@gmail.com').trim();
 const supportSender = String(process.env.SUPPORT_FROM || 'flightverifyer desk <onboarding@resend.dev>').trim();
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
+
+// Render's free tier blocks outbound SMTP, so without a Resend key the request
+// goes out over HTTPS through a no-account mail relay (formsubmit.co) instead.
+const supportFormEndpoint = (() => {
+  const configured = String(process.env.SUPPORT_FORM_ENDPOINT || '').trim();
+  if (configured) return /^(off|none|disabled|false)$/i.test(configured) ? '' : configured;
+  return `https://formsubmit.co/ajax/${supportRecipient}`;
+})();
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;',
@@ -658,11 +667,41 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   "'": '&#39;'
 }[char]));
 
+async function sendViaFormRelay(request, subject) {
+  const response = await fetch(supportFormEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      _subject: subject,
+      _template: 'table',
+      _captcha: 'false',
+      _replyto: request.email,
+      Reference: request.reference,
+      Name: request.name,
+      Email: request.email,
+      Category: request.category,
+      Priority: request.priority,
+      Received: request.createdAt,
+      Message: request.message
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Mail relay responded ${response.status}: ${detail.slice(0, 300)}`);
+  }
+
+  return true;
+}
+
 async function emailSupportRequest(request) {
-  if (!resendApiKey) {
-    console.warn('[support] RESEND_API_KEY is not set; the request was saved but not emailed.');
+  if (!resendApiKey && !supportFormEndpoint) {
+    console.warn('[support] No mail transport configured (RESEND_API_KEY or SUPPORT_FORM_ENDPOINT); the request was saved but not emailed.');
     return false;
   }
+
+  const subject = `[${request.reference}] ${request.category} — ${request.priority}`;
 
   const fields = [
     ['Reference', request.reference],
@@ -703,6 +742,10 @@ async function emailSupportRequest(request) {
   </table>
 </body></html>`;
 
+  if (!resendApiKey) {
+    return sendViaFormRelay(request, subject);
+  }
+
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -713,7 +756,7 @@ async function emailSupportRequest(request) {
       from: supportSender,
       to: [supportRecipient],
       reply_to: request.email,
-      subject: `[${request.reference}] ${request.category} — ${request.priority}`,
+      subject,
       text,
       html
     }),
@@ -981,6 +1024,7 @@ initWithRetry().then((ready) => {
   app.listen(port, () => {
     console.log(`VerifyMyFlight desk listening on http://localhost:${port}`);
     console.log(`[db] Neon Postgres ${ready ? 'connected' : 'NOT connected'}`);
+    console.log(`[support] requests email to ${supportRecipient} via ${resendApiKey ? 'Resend' : supportFormEndpoint ? `relay ${supportFormEndpoint}` : 'no transport (not emailed)'}`);
     if (usingDefaultCredentials) {
       console.warn('[admin] Using default sign-in admin@verifymyflight.local / verify-admin-2026 — set ADMIN_EMAIL and ADMIN_PASSWORD before deploying.');
     }
