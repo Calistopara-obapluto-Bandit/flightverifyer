@@ -2443,6 +2443,46 @@ body.verify-page .result {
   line-height: 1.4;
 }
 
+.parcel-party {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.parcel-party__col {
+  padding: 24px 32px 28px;
+  border-right: 1px solid var(--line);
+}
+
+.parcel-party__col:last-child { border-right: 0; }
+
+.parcel-party__col h3 {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.parcel-party__name {
+  margin-top: 10px;
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.parcel-contact {
+  overflow-wrap: anywhere;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.parcel-contact:hover { color: var(--signal); }
+
 .parcel-alert {
   margin: 0 32px;
   padding: 14px 16px;

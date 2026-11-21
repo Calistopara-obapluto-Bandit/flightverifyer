@@ -37,6 +37,30 @@ function money(value, currency) {
   }
 }
 
+function phoneMarkup(value) {
+  const phone = String(value || '').trim();
+  if (!phone) return '—';
+  const dial = phone.replace(/[^\d+]/g, '');
+  return `<a class="parcel-contact" href="tel:${esc(dial)}">${esc(phone)}</a>`;
+}
+
+function emailMarkup(value) {
+  const email = String(value || '').trim();
+  if (!email) return '—';
+  return `<a class="parcel-contact" href="mailto:${esc(email)}">${esc(email)}</a>`;
+}
+
+function partyMarkup(title, name, phone, email) {
+  return `<section class="parcel-party__col">
+          <h3>${esc(title)}</h3>
+          <p class="parcel-party__name">${esc(name || '—')}</p>
+          <dl class="parcel-facts">
+            <div><dt>Phone</dt><dd class="mono">${phoneMarkup(phone)}</dd></div>
+            <div><dt>Email</dt><dd>${emailMarkup(email)}</dd></div>
+          </dl>
+        </section>`;
+}
+
 function watermarkMarkup() {
   const marks = Array.from({ length: 15 }, () => `
     <div class="print-watermark__mark">
@@ -159,7 +183,6 @@ function renderTrack(shipment, checkedAt) {
             <div><dt>Delivery agent</dt><dd>${esc(shipment.agent)}</dd></div>
             <div><dt>Vehicle</dt><dd class="mono">${esc(shipment.vehicle)}</dd></div>
             <div><dt>Delivery window</dt><dd class="mono">${esc(shipment.window)}</dd></div>
-            <div><dt>Recipient</dt><dd>${esc(shipment.recipientName)}</dd></div>
           </dl>
         </section>
         <section class="parcel-card">
@@ -169,10 +192,14 @@ function renderTrack(shipment, checkedAt) {
             <div><dt>Pieces / weight</dt><dd>${shipment.pieces} × ${shipment.weightKg} kg</dd></div>
             <div><dt>Declared value</dt><dd>${esc(money(shipment.declaredValue, shipment.currency))}${shipment.insured ? ' · insured' : ''}</dd></div>
             <div><dt>Customs</dt><dd class="mono">${esc(shipment.customsLabel)}</dd></div>
-            <div><dt>Sender</dt><dd>${esc(shipment.senderName || '—')}</dd></div>
           </dl>
         </section>
       </div>
+
+      <section class="parcel-party">
+        ${partyMarkup('Sender', shipment.senderName, shipment.senderPhone, shipment.senderEmail)}
+        ${partyMarkup('Recipient', shipment.recipientName, shipment.recipientPhone, shipment.recipientEmail)}
+      </section>
 
       ${held && shipment.holdReason ? `<p class="parcel-alert"><b>On hold.</b> ${esc(shipment.holdReason)}</p>` : ''}
 

@@ -345,7 +345,7 @@ function renderShipments(shipments) {
     return `<tr>
       <td class="code">${esc(shipment.code)}</td>
       <td>${esc(shipment.route)}<br><span class="mono">${esc(shipment.service)}</span></td>
-      <td>${esc(shipment.recipient)}</td>
+      <td>${esc(shipment.recipient)}${shipment.recipientPhone ? `<br><span class="mono">${esc(shipment.recipientPhone)}</span>` : ''}</td>
       <td class="mono status-cell status-cell--${esc(shipment.statusKey)}">${esc(shipment.status)}</td>
       <td class="mono">${esc(eta)}</td>
       <td>
