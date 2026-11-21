@@ -1719,3 +1719,236 @@ h1 em {
     color: #444 !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Professional pass                                                   */
+/* ------------------------------------------------------------------ */
+
+[hidden] {
+  display: none !important;
+}
+
+::selection {
+  background: rgba(217, 72, 31, 0.18);
+}
+
+.topbar {
+  box-shadow: 0 1px 0 rgba(22, 33, 31, 0.04);
+}
+
+.brand {
+  letter-spacing: -0.025em;
+}
+
+.hero {
+  align-items: center;
+}
+
+.hero-board {
+  padding-top: 6px;
+  gap: 14px;
+}
+
+.board-card {
+  transform: none;
+  box-shadow: 0 1px 0 rgba(22, 33, 31, 0.05), 0 36px 70px -48px rgba(22, 33, 31, 0.6);
+}
+
+.board-card--offset,
+.board-stamp {
+  display: none;
+}
+
+.board-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--ink-faint);
+}
+
+.board-foot .mono {
+  font-size: 9px;
+}
+
+.board-ledger {
+  border: 1px solid var(--line);
+  background: rgba(251, 247, 239, 0.72);
+}
+
+.board-ledger > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-ledger > div:last-child {
+  border-bottom: 0;
+}
+
+.board-ledger span {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.board-ledger b {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.dossier-title {
+  font-size: clamp(36px, 5vw, 58px);
+}
+
+.meta-strip div {
+  padding: 13px 16px;
+}
+
+.block {
+  padding-block: 38px;
+}
+
+.route {
+  padding: 26px 28px;
+}
+
+.status-pill--live {
+  border-color: var(--signal);
+  background: #fbe8e1;
+  color: var(--signal-dark);
+}
+
+.status-pill--live .pulse {
+  background: var(--signal);
+}
+
+/* ------------------------------------------------------------------ */
+/* Live radar                                                          */
+/* ------------------------------------------------------------------ */
+
+.radar-canvas {
+  background: #0f1816;
+  color: #7fd8c4;
+}
+
+.radar-canvas svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.radar-canvas--inline {
+  max-height: 400px;
+  overflow: hidden;
+}
+
+.radar-plane path {
+  filter: drop-shadow(0 0 6px rgba(127, 216, 196, 0.55));
+}
+
+.radar-trail {
+  transition: stroke-dasharray 0.2s linear;
+}
+
+.radar-empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 46px 20px;
+  text-align: center;
+  color: rgba(242, 236, 225, 0.68);
+}
+
+.radar-empty p:first-child {
+  font-family: var(--serif);
+  font-size: 26px;
+  color: #f2ece1;
+}
+
+.radar-empty .mono {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: rgba(242, 236, 225, 0.5);
+  text-transform: none;
+}
+
+.live-map {
+  margin-top: 22px;
+  border: 1px solid var(--line-strong);
+  background: #0f1816;
+  color: #dcebe6;
+}
+
+.live-map-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(242, 236, 225, 0.16);
+  color: rgba(242, 236, 225, 0.55);
+}
+
+.live-map-head .mono {
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+}
+
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #7fd8c4;
+}
+
+.live-badge .pulse {
+  background: #7fd8c4;
+  color: #7fd8c4;
+}
+
+.live-map .radar-readout {
+  border-top: 1px solid rgba(242, 236, 225, 0.16);
+}
+
+.radar-readout {
+  color: #dcebe6;
+}
+
+.radar-readout dd {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.radar-panel .radar-readout dd {
+  color: var(--bone);
+}
+
+@media (max-width: 720px) {
+  .radar-canvas--inline {
+    max-height: 240px;
+  }
+
+  .live-map-head .mono {
+    display: none;
+  }
+}
+
+@media print {
+  .live-map {
+    display: none !important;
+  }
+}

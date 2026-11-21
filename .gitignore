@@ -1,5 +1,6 @@
 node_modules/
 .env
 .env.local
+.tmp-mem-server.js
 data/support-requests.json
 .DS_Store

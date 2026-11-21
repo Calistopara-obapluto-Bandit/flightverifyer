@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#16211f">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/admin.css">
 </head>
@@ -31,17 +33,32 @@
   <main class="admin-shell">
     <!-- Sign in -->
     <section class="admin-auth" id="auth-view">
-      <div class="auth-card">
-        <p class="eyebrow"><span>00</span> Restricted</p>
-        <h1 class="auth-title">Reservations <em>desk</em></h1>
-        <p class="auth-note">This console issues verification records. Sign in with the administrator credentials configured for this deployment.</p>
+      <div class="auth-shell">
+        <aside class="auth-brand">
+          <div>
+            <p class="mono">VerifyMyFlight operations</p>
+            <h2>Reservations<br><em>control room</em></h2>
+            <p class="auth-brand-note">Issue verification records, attach live telemetry and hand each client one tracking code.</p>
+          </div>
+          <ul class="auth-points">
+            <li>Unique BX tracking codes</li>
+            <li>Neon-backed reservation ledger</li>
+            <li>Live ADS-B corridor feed</li>
+          </ul>
+          <p class="mono auth-brand-foot">Restricted · staff access only</p>
+        </aside>
+        <div class="auth-card">
+        <p class="eyebrow"><span>00</span> Sign in</p>
+        <h1 class="auth-title">Admin <em>access</em></h1>
+        <p class="auth-note">Use the administrator credentials configured for this deployment.</p>
         <form id="login-form" class="auth-form" novalidate>
           <label>Email address<input name="email" type="email" autocomplete="username" required></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <p class="form-status" id="login-status" role="status" aria-live="polite"></p>
           <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
         </form>
-        <p class="auth-footnote mono">Authorised staff only · sessions expire after 8 hours</p>
+        <p class="auth-footnote mono">Sessions expire after 8 hours</p>
+        </div>
       </div>
     </section>
 
@@ -52,6 +69,7 @@
           <p class="eyebrow"><span>01</span> Record desk</p>
           <h1 class="console-title">Issue a flight record</h1>
           <p class="console-note">Every saved record receives a unique <b>BX-</b> tracking code. Share that code with the client; it opens the public verification dossier.</p>
+          <p class="signed-in" id="signed-in"></p>
         </div>
         <dl class="console-stats">
           <div><dt>Total records</dt><dd id="stat-total">—</dd></div>

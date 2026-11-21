@@ -141,6 +141,7 @@ function renderDossier(booking, payload) {
   const passengers = booking.passengers || [];
   const lead = passengers[0] || {};
   const hasPosition = Number.isFinite(telemetry.lat) && Number.isFinite(telemetry.lon);
+  const statusClass = /IN FLIGHT/i.test(String(booking.status)) ? 'status-pill--live' : '';
   const verifiedAt = new Date(payload.verifiedAt || Date.now());
   const verifiedLabel = verifiedAt.toLocaleString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
@@ -240,7 +241,7 @@ function renderDossier(booking, payload) {
           <p class="dossier-sub">${esc(booking.airline)} ${esc(booking.flightNumber)} · ${esc(departure.iata)} → ${esc(arrival.iata)} · ${passengers.length} passenger${passengers.length === 1 ? '' : 's'}</p>
         </div>
         <div>
-          <span class="status-pill"><span class="pulse" aria-hidden="true"></span>${esc(booking.status)}</span>
+          <span class="status-pill ${statusClass}"><span class="pulse" aria-hidden="true"></span>${esc(booking.status)}</span>
           <div class="dossier-actions" style="margin-top:12px">
             <button type="button" class="btn btn-ghost btn-small" data-action="print">Print dossier</button>
             <button type="button" class="btn btn-ghost btn-small" data-action="radar">Open radar</button>
@@ -301,8 +302,16 @@ function renderDossier(booking, payload) {
             <div><dt>Vertical rate</dt><dd>${number(telemetry.verticalRate)}<small>fpm</small></dd></div>
             <div><dt>GPS position</dt><dd>${hasPosition ? `${Number(telemetry.lat).toFixed(2)}N / ${Number(telemetry.lon).toFixed(2)}E` : 'Not transmitted'}</dd></div>
           </dl>
+          <div class="live-map">
+            <div class="live-map-head">
+              <span class="live-badge"><span class="pulse" aria-hidden="true"></span>Live corridor</span>
+              <span class="mono">ADS-B position feed</span>
+            </div>
+            <div class="radar-canvas radar-canvas--inline" id="live-map-canvas"></div>
+            <div class="radar-readout" id="live-map-readout"></div>
+          </div>
           <div style="margin-top:16px">
-            <button type="button" class="btn btn-ghost btn-small" data-action="radar">Launch route console</button>
+            <button type="button" class="btn btn-ghost btn-small" data-action="radar">Launch full radar console</button>
           </div>
         </div>
       </section>
@@ -349,12 +358,22 @@ function renderDossier(booking, payload) {
       </footer>
     </article>`;
 
+  stopAllRadars();
   els.result.innerHTML = html;
+  mountRadar({
+    canvas: $('#live-map-canvas'),
+    readout: $('#live-map-readout'),
+    booking,
+    compact: true
+  });
 }
 
 /* ------------------------------------------------------------------ */
 /* Radar console                                                       */
 /* ------------------------------------------------------------------ */
+
+const radarStops = new Map();
+let radarCounter = 0;
 
 function projectPoint(lat, lon, bounds) {
   const x = 40 + ((lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 680;
@@ -362,29 +381,43 @@ function projectPoint(lat, lon, bounds) {
   return { x, y };
 }
 
-function drawRadar(booking) {
-  if (!booking) return;
-  const map = $('#radar-map');
-  const path = $('#radar-path');
-  const points = $('#radar-points');
-  const labels = $('#radar-labels');
-  const plane = $('#radar-plane');
-  const readout = $('#radar-readout');
-  if (!map || !path) return;
+function clockLabel() {
+  return new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' });
+}
+
+function stopRadar(canvas) {
+  const stop = canvas ? radarStops.get(canvas) : null;
+  if (stop) {
+    stop();
+    radarStops.delete(canvas);
+  }
+}
+
+function stopAllRadars() {
+  for (const stop of radarStops.values()) stop();
+  radarStops.clear();
+}
+
+function mountRadar({ canvas, readout, booking, compact = false }) {
+  if (!canvas) return;
+  stopRadar(canvas);
+
+  if (!booking) {
+    canvas.innerHTML = '<div class="radar-empty"><p>No record loaded</p><p class="mono">Verify a tracking code to open the live corridor.</p></div>';
+    if (readout) readout.innerHTML = '';
+    return;
+  }
 
   const { departure, arrival, telemetry } = booking;
   const hasCoords = [departure.lat, departure.lon, arrival.lat, arrival.lon, telemetry.lat, telemetry.lon]
     .every((value) => Number.isFinite(value));
 
   if (!hasCoords) {
-    path.setAttribute('d', '');
-    points.innerHTML = '';
-    labels.innerHTML = '';
-    plane.setAttribute('visibility', 'hidden');
-    readout.innerHTML = `<div><dt>Flight</dt><dd>${esc(booking.flightNumber)}</dd></div><div><dt>Position</dt><dd>Not transmitted</dd></div>`;
+    canvas.innerHTML = '<div class="radar-empty"><p>Position not transmitted</p><p class="mono">This record has schedule data only.</p></div>';
+    if (readout) readout.innerHTML = `<div><dt>Flight</dt><dd>${esc(booking.flightNumber)}</dd></div><div><dt>Status</dt><dd>Schedule only</dd></div>`;
     return;
   }
-  plane.setAttribute('visibility', 'visible');
+
   const lats = [departure.lat, arrival.lat, telemetry.lat];
   const lons = [departure.lon, arrival.lon, telemetry.lon];
   const bounds = {
@@ -399,35 +432,118 @@ function drawRadar(booking) {
   const mid = { x: (dep.x + arr.x) / 2, y: (dep.y + arr.y) / 2 };
   const dx = arr.x - dep.x;
   const dy = arr.y - dep.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const curve = 55;
-  const control = { x: mid.x - (dy / length) * curve, y: mid.y + (dx / length) * curve };
+  const span = Math.hypot(dx, dy) || 1;
+  const control = { x: mid.x - (dy / span) * 55, y: mid.y + (dx / span) * 55 };
+  const route = `M${dep.x} ${dep.y} Q${control.x} ${control.y} ${arr.x} ${arr.y}`;
+  const uid = `radar${radarCounter += 1}`;
 
-  path.setAttribute('d', `M${dep.x} ${dep.y} Q${control.x} ${control.y} ${arr.x} ${arr.y}`);
+  canvas.innerHTML = `<svg viewBox="0 0 760 360" role="img" aria-label="Live route corridor for ${esc(booking.flightNumber)}">
+    <defs>
+      <pattern id="${uid}-grid" width="38" height="38" patternUnits="userSpaceOnUse">
+        <path d="M38 0H0v38" fill="none" stroke="currentColor" stroke-opacity=".13" stroke-width="1"/>
+      </pattern>
+      <radialGradient id="${uid}-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#7fd8c4" stop-opacity=".22"/>
+        <stop offset="100%" stop-color="#7fd8c4" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="760" height="360" fill="url(#${uid}-grid)"/>
+    <circle cx="380" cy="180" r="150" fill="url(#${uid}-glow)"/>
+    <g fill="none" stroke="currentColor" stroke-opacity=".22">
+      <circle cx="380" cy="180" r="60"/><circle cx="380" cy="180" r="110"/><circle cx="380" cy="180" r="160"/>
+      <line x1="40" y1="180" x2="720" y2="180" stroke-opacity=".12"/><line x1="380" y1="20" x2="380" y2="340" stroke-opacity=".12"/>
+    </g>
+    <g opacity=".45">
+      <line x1="380" y1="180" x2="380" y2="25" stroke="#7fd8c4" stroke-width="1.4"/>
+      <animateTransform attributeName="transform" type="rotate" from="0 380 180" to="360 380 180" dur="7s" repeatCount="indefinite"/>
+    </g>
+    <path d="${route}" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="1.6" stroke-dasharray="6 7"/>
+    <path d="${route}" class="radar-trail" fill="none" stroke="#7fd8c4" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="${dep.x}" cy="${dep.y}" r="4.5" fill="#0e5a4e" stroke="#f2ece1" stroke-width="1.3"/>
+    <circle cx="${arr.x}" cy="${arr.y}" r="4.5" fill="#d9481f" stroke="#f2ece1" stroke-width="1.3"/>
+    <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">
+      <text x="${dep.x + 10}" y="${dep.y + 4}">${esc(departure.iata)} · ${esc(String(departure.city).toUpperCase())}</text>
+      <text x="${arr.x - 10}" y="${arr.y + 4}" text-anchor="end">${esc(arrival.iata)} · ${esc(String(arrival.city).toUpperCase())}</text>
+    </g>
+    <g class="radar-plane">
+      <circle r="17" fill="#7fd8c4" fill-opacity=".14"/>
+      <circle r="26" fill="none" stroke="#7fd8c4" stroke-opacity=".35">
+        <animate attributeName="r" values="14;30" dur="2.6s" repeatCount="indefinite"/>
+        <animate attributeName="stroke-opacity" values=".55;0" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
+      <path d="M0 -13 4.6 -3 13 1.4 13 4 4.6 3 3.6 12 0 13.8 -3.6 12 -4.6 3 -13 4 -13 1.4 -4.6 -3Z" fill="#7fd8c4"/>
+    </g>
+  </svg>`;
 
-  const circle = (point, fill) =>
-    `<circle cx="${point.x}" cy="${point.y}" r="5" fill="${fill}" stroke="currentColor" stroke-width="1.4"/>`;
+  const svg = canvas.querySelector('svg');
+  const trail = svg.querySelector('.radar-trail');
+  const plane = svg.querySelector('.radar-plane');
+  const total = trail.getTotalLength();
 
-  points.innerHTML = `${circle(dep, '#0e5a4e')}${circle(arr, '#d9481f')}`;
+  const startProgress = Math.min(96, Math.max(1, Number(telemetry.progress) || 1));
+  const startLat = Number(telemetry.lat);
+  const startLon = Number(telemetry.lon);
+  const remaining = Math.max(1, 100 - startProgress);
+  let progress = startProgress;
+  let last = performance.now();
+  let lastReadout = 0;
+  let frame = 0;
 
-  labels.innerHTML = `
-    <text x="${dep.x + 10}" y="${dep.y + 4}" fill="currentColor">${esc(departure.iata)} · ${esc(departure.city.toUpperCase())}</text>
-    <text x="${arr.x - 10}" y="${arr.y + 4}" text-anchor="end" fill="currentColor">${esc(arrival.iata)} · ${esc(arrival.city.toUpperCase())}</text>`;
+  const positionAt = (pct) => {
+    const ratio = Math.min(1, Math.max(0, (pct - startProgress) / remaining));
+    return {
+      lat: startLat + (Number(arrival.lat) - startLat) * ratio,
+      lon: startLon + (Number(arrival.lon) - startLon) * ratio
+    };
+  };
 
-  const total = path.getTotalLength();
-  const t = Math.min(0.99, Math.max(0.01, Number(telemetry.progress) / 100));
-  const current = path.getPointAtLength(total * t);
-  plane.setAttribute('transform', `translate(${current.x} ${current.y}) rotate(${Number(telemetry.heading) || 0})`);
+  const paint = () => {
+    const fraction = progress / 100;
+    const point = trail.getPointAtLength(total * fraction);
+    const ahead = trail.getPointAtLength(total * Math.min(1, fraction + 0.01));
+    const angle = (Math.atan2(ahead.y - point.y, ahead.x - point.x) * 180) / Math.PI + 90;
+    plane.setAttribute('transform', `translate(${point.x} ${point.y}) rotate(${angle})`);
+    trail.setAttribute('stroke-dasharray', `${total * fraction} ${total}`);
+  };
 
-  readout.innerHTML = `
-    <div><dt>Flight</dt><dd>${esc(booking.flightNumber)}</dd></div>
-    <div><dt>Altitude</dt><dd>${number(telemetry.altitudeFt)} ft</dd></div>
-    <div><dt>Ground speed</dt><dd>${number(telemetry.groundSpeedKts)} kts</dd></div>
-    <div><dt>Mach</dt><dd>${esc(telemetry.mach)}</dd></div>
-    <div><dt>Track</dt><dd>${number(telemetry.heading)}°</dd></div>
-    <div><dt>Squawk</dt><dd>${esc(telemetry.squawk)}</dd></div>
-    <div><dt>Position</dt><dd>${Number(telemetry.lat).toFixed(2)} / ${Number(telemetry.lon).toFixed(2)}</dd></div>
-    <div><dt>Corridor</dt><dd>${esc(telemetry.progress)}%</dd></div>`;
+  const paintReadout = (now) => {
+    const position = positionAt(progress);
+    const wobble = Math.sin(now / 2400);
+    const altitude = Math.max(0, Math.round((Number(telemetry.altitudeFt) || 0) + wobble * 40));
+    const speed = Math.max(0, Math.round((Number(telemetry.groundSpeedKts) || 0) + Math.cos(now / 3100) * 3));
+    const cells = [
+      ['Flight', esc(booking.flightNumber)],
+      ['Altitude', `${number(altitude)} ft`],
+      ['Ground speed', `${number(speed)} kts`],
+      ['Track', `${number(telemetry.heading)}°`],
+      ['Squawk', esc(telemetry.squawk)],
+      ['Position', `${position.lat.toFixed(2)} / ${position.lon.toFixed(2)}`],
+      ['Corridor', `${progress.toFixed(1)}%`],
+      ['Last ping', `${clockLabel()} UTC`]
+    ];
+    if (readout) {
+      readout.innerHTML = (compact ? cells.slice(0, 6) : cells)
+        .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
+        .join('');
+    }
+  };
+
+  const tick = (now) => {
+    const delta = Math.min(120, now - last) / 1000;
+    last = now;
+    progress = Math.min(97.5, progress + delta * 0.5);
+    paint();
+    if (now - lastReadout > 500) {
+      paintReadout(now);
+      lastReadout = now;
+    }
+    frame = window.requestAnimationFrame(tick);
+  };
+
+  paint();
+  paintReadout(performance.now());
+  frame = window.requestAnimationFrame(tick);
+  radarStops.set(canvas, () => window.cancelAnimationFrame(frame));
 }
 
 /* ------------------------------------------------------------------ */
@@ -448,12 +564,19 @@ function openModal(name) {
   modal.hidden = false;
   openModalId = modal.id;
   document.body.style.overflow = 'hidden';
-  if (name === 'radar') drawRadar(state.booking);
+  if (name === 'radar') {
+    mountRadar({
+      canvas: $('#radar-canvas'),
+      readout: $('#radar-readout'),
+      booking: state.booking
+    });
+  }
   const focusTarget = modal.querySelector('[data-close]') || modal.querySelector('button');
   if (focusTarget) focusTarget.focus();
 }
 
 function closeModal() {
+  stopRadar($('#radar-canvas'));
   Object.values(modalIds).forEach((id) => {
     const element = document.getElementById(id);
     if (element) element.hidden = true;

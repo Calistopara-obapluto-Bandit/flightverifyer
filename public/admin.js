@@ -48,6 +48,8 @@ function showConsole(email) {
   views.auth.hidden = true;
   views.console.hidden = false;
   signOut.hidden = false;
+  const signedIn = $('#signed-in');
+  if (signedIn) signedIn.textContent = email ? `Signed in as ${email}` : '';
   if (email) signOut.dataset.email = email;
   loadRecords();
 }

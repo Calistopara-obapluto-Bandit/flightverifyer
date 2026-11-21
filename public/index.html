@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VerifyMyFlight — Booking verification desk</title>
   <meta name="description" content="Verify a flight booking against the reservation ledger. Open the itinerary, passenger manifest, fare receipt and live aircraft telemetry.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#16211f">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
@@ -59,25 +61,24 @@
       <aside class="hero-board" aria-hidden="true">
         <div class="board-card">
           <div class="board-head">
-            <span class="mono">Ledger · live</span>
-            <span class="board-live"><span class="pulse"></span> streaming</span>
+            <span class="mono">Corridor preview · BA 075</span>
+            <span class="board-live"><span class="pulse"></span>live</span>
           </div>
           <p class="board-route">LOS <span class="board-arc"><svg viewBox="0 0 160 40" preserveAspectRatio="none"><path d="M4 34C46 2 112 2 156 26" stroke="currentColor" stroke-width="1.6" fill="none" stroke-dasharray="5 5"/><circle cx="4" cy="34" r="3" fill="currentColor"/><circle cx="156" cy="26" r="3" fill="currentColor"/><path d="m100 11 9 2-5 8z" fill="currentColor"/></svg></span> LHR</p>
           <div class="board-rows">
             <div><span>Altitude</span><b>37,000 ft</b></div>
             <div><span>Ground speed</span><b>489 kts</b></div>
-            <div><span>Squawk</span><b>4417</b></div>
             <div><span>Position</span><b>30.21N / 4.38E</b></div>
+            <div><span>Squawk</span><b>4417</b></div>
           </div>
           <div class="board-progress"><span style="width:58%"></span></div>
-          <p class="board-note mono">58% of corridor · G-ZBKA / B789</p>
+          <div class="board-foot"><span class="mono">58% corridor</span><span class="mono">G-ZBKA · B789</span></div>
         </div>
-        <div class="board-card board-card--offset">
-          <p class="board-label">Verified in the last minute</p>
-          <p class="board-big">128</p>
-          <p class="board-note mono">Bookings · tickets · manifests</p>
+        <div class="board-ledger">
+          <div><span>Ledger state</span><b>Nominal</b></div>
+          <div><span>Record sync</span><b>&lt; 2 s</b></div>
+          <div><span>Coverage</span><b>450+ carriers</b></div>
         </div>
-        <div class="board-stamp">CHECKED<br>AGAINST<br>CARRIER</div>
       </aside>
     </section>
 
@@ -132,27 +133,8 @@
       </div>
       <h2 id="radar-title">Live route console</h2>
       <div class="radar" id="radar">
-        <svg id="radar-map" viewBox="0 0 760 360" role="img" aria-label="Route corridor with aircraft position">
-          <defs>
-            <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
-              <path d="M38 0H0v38" fill="none" stroke="currentColor" stroke-opacity=".16" stroke-width="1"/>
-            </pattern>
-          </defs>
-          <rect width="760" height="360" fill="url(#grid)"/>
-          <g id="radar-rings" fill="none" stroke="currentColor" stroke-opacity=".22">
-            <circle cx="380" cy="180" r="60"/><circle cx="380" cy="180" r="110"/><circle cx="380" cy="180" r="160"/>
-          </g>
-          <path id="radar-path" d="" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="2" stroke-dasharray="7 7"/>
-          <g id="radar-points"></g>
-          <g id="radar-plane" transform="translate(380 180)">
-            <circle r="16" fill="currentColor" fill-opacity=".12"/>
-            <path d="M0 -12 5 -2 12 2 12 5 4 4 3 12 0 14 -3 12 -4 4 -12 5 -12 2 -5 -2Z" fill="currentColor"/>
-          </g>
-          <g id="radar-labels" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor"></g>
-        </svg>
-        <div class="radar-readout" id="radar-readout">
-          <p class="mono">No record loaded</p>
-        </div>
+        <div class="radar-canvas" id="radar-canvas"></div>
+        <div class="radar-readout" id="radar-readout"></div>
       </div>
       <button type="button" class="btn btn-ghost" data-close>Exit console</button>
     </div>
