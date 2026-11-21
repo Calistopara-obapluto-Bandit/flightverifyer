@@ -1436,13 +1436,18 @@ app.post('/api/support', async (req, res, next) => {
     await fs.rename(temporaryFile, supportFile);
 
     let emailed = false;
+    let emailError = '';
     try {
       emailed = await emailSupportRequest(request);
+      if (!emailed) emailError = 'No mail transport is configured on the server.';
     } catch (error) {
+      emailError = error.message;
       console.error(`[support] email delivery failed for ${request.reference}:`, error.message);
     }
 
-    await saveSupportRequest({ ...request, emailed });
+    // The reason is kept with the ticket so the console can explain a miss
+    // without anyone having to open the Render logs.
+    await saveSupportRequest({ ...request, emailed, emailError });
 
     res.status(201).json({ reference: request.reference, receivedAt: request.createdAt, emailed });
   } catch (error) {
@@ -1472,10 +1477,11 @@ app.post('/api/admin/support/:id/email', requireAdmin, requireDatabase, asyncRou
     await emailSupportRequest(request);
   } catch (error) {
     console.error(`[support] retry failed for ${request.reference}:`, error.message);
+    await saveSupportRequest({ ...request, emailed: false, emailError: error.message });
     return res.status(502).json({ error: `Mail could not be sent. ${error.message}` });
   }
 
-  await saveSupportRequest({ ...request, emailed: true });
+  await saveSupportRequest({ ...request, emailed: true, emailError: '' });
   console.log(`[support] ${request.reference} re-sent from the console`);
   res.json({ emailed: true });
 }));

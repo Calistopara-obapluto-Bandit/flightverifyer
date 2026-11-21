@@ -588,7 +588,8 @@ function renderSupport(requests) {
       <h3>${esc(request.category)}</h3>
       <p class="support-card__from">${esc(request.name)} · <a href="mailto:${esc(request.email)}">${esc(request.email)}</a></p>
       <p class="support-card__message">${esc(request.message)}</p>
-      ${request.emailed ? '' : `<button type="button" class="btn btn-ghost btn-small" data-email-request="${esc(request.id)}">Email to inbox</button>`}
+      ${request.emailed ? '' : `${request.emailError ? `<p class="support-card__error">${esc(request.emailError)}</p>` : ''}
+      <button type="button" class="btn btn-ghost btn-small" data-email-request="${esc(request.id)}">Email to inbox</button>`}
     </article>`;
   }).join('');
 }

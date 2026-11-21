@@ -876,6 +876,16 @@
   white-space: pre-wrap;
 }
 
+.support-card__error {
+  margin: 12px 0 10px;
+  padding: 8px 12px;
+  border-left: 2px solid #d9481f;
+  background: rgba(217, 72, 31, 0.06);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
 @media (max-width: 640px) {
   .photo-upload { grid-template-columns: 1fr; }
 }
